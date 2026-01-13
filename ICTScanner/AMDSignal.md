@@ -1,8 +1,4 @@
-C'est le point crucial.
-
-Si le robot attend que le pattern soit **complet** (c'est-à-dire que le bas soit *déjà* cassé), il sera **trop tard** pour trader (le mouvement est fini).
-
-Pour que ce soit un outil de trading, il faut changer la logique :
+La logique :
 1.  On attend la cassure du HAUT (Le piège / Bull Trap).
 2.  On attend que le prix **réintègre** le range (repassage sous le haut).
 3.  **ALERTE :** "Vends maintenant !"
