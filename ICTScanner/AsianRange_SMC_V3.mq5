@@ -1,6 +1,6 @@
 //+------------------------------------------------------------------+
 //|                                         AsianRange_SMC_V3.mq5    |
-//|                                  Copyright 2024, Trading Robot   |
+//|                                  Copyright 2026, NefSetKatProd   |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2024"
 #property version   "3.00"
