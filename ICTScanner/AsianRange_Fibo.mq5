@@ -33,7 +33,7 @@ int OnCalculate(const int rates_total, const int prev_calculated, const int begi
       double h = iHigh(_Symbol, _Period, iHighest(_Symbol, _Period, MODE_HIGH, count, endBar + 1));
       double l = iLow(_Symbol, _Period, iLowest(_Symbol, _Period, MODE_LOW, count, endBar + 1));
       double mid = (h + l) / 2.0;
-      double dist = h - mid; 
+      double dist = h - mid; // Distance Mid -> High
 
       // 1. DESSIN DU CADRE (RECTANGLE SANS REMPLISSAGE)
       DrawBox("AS_RECT", sTime, eTime, h, l, ColorBorder);
@@ -43,24 +43,29 @@ int OnCalculate(const int rates_total, const int prev_calculated, const int begi
       DrawLine("AS_LOW", sTime, eTime + (8*3600), l, ColorHighLow, 2, STYLE_SOLID);
       DrawLine("AS_MID", sTime, eTime, mid, clrOrange, 1, STYLE_DOT);
 
-      // 3. DESSIN DES EXTENSIONS FIBONACCI
+      // 3. DESSIN DES EXTENSIONS FIBONACCI (1.618, 2.618, 3.618, 4.236)
       if(ShowFibo) 
       {
          datetime fibEnd = eTime + (12 * 3600); 
+         
+         // Extensions Hautes
          DrawLine("FIB_H1", eTime, fibEnd, mid + (dist * 1.618), ColorFibo, 1, STYLE_DASH);
          DrawLine("FIB_H2", eTime, fibEnd, mid + (dist * 2.618), ColorFibo, 1, STYLE_DASH);
          DrawLine("FIB_H3", eTime, fibEnd, mid + (dist * 3.618), ColorFibo, 1, STYLE_DASH);
+         DrawLine("FIB_H4", eTime, fibEnd, mid + (dist * 4.236), ColorFibo, 1, STYLE_DASH); // <-- Nouveau
 
+         // Extensions Basses
          DrawLine("FIB_L1", eTime, fibEnd, mid - (dist * 1.618), ColorFibo, 1, STYLE_DASH);
          DrawLine("FIB_L2", eTime, fibEnd, mid - (dist * 2.618), ColorFibo, 1, STYLE_DASH);
          DrawLine("FIB_L3", eTime, fibEnd, mid - (dist * 3.618), ColorFibo, 1, STYLE_DASH);
+         DrawLine("FIB_L4", eTime, fibEnd, mid - (dist * 4.236), ColorFibo, 1, STYLE_DASH); // <-- Nouveau
       }
    }
    return(rates_total);
 }
 
 //+------------------------------------------------------------------+
-//| FONCTION DESSIN RECTANGLE (SANS REMPLISSAGE)                     |
+//| FONCTION DESSIN RECTANGLE                                        |
 //+------------------------------------------------------------------+
 void DrawBox(string name, datetime t1, datetime t2, double p1, double p2, color col)
 {
@@ -70,10 +75,11 @@ void DrawBox(string name, datetime t1, datetime t2, double p1, double p2, color 
    ObjectSetDouble(0, name, OBJPROP_PRICE, 0, p1);
    ObjectSetInteger(0, name, OBJPROP_TIME, 1, t2);
    ObjectSetDouble(0, name, OBJPROP_PRICE, 1, p2);
-   ObjectSetInteger(0, name, OBJPROP_COLOR, col);
-   ObjectSetInteger(0, name, OBJPROP_FILL, false); // <--- DÉSACTIVE LA COLORATION
-   ObjectSetInteger(0, name, OBJPROP_STYLE, STYLE_DOT); // Contour en pointillés
-   ObjectSetInteger(0, name, OBJPROP_BACK, true);
+   
+   ObjectSetInteger(0, name, OBJPROP_COLOR, col);     // Couleur de la bordure
+   ObjectSetInteger(0, name, OBJPROP_FILL, false);    // <--- METTRE SUR FALSE ICI
+   ObjectSetInteger(0, name, OBJPROP_STYLE, STYLE_DOT); // Bordure en pointillés
+   ObjectSetInteger(0, name, OBJPROP_BACK, true);     // Derrière les bougies
 }
 
 //+------------------------------------------------------------------+
