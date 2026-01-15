@@ -1,108 +1,128 @@
 //+------------------------------------------------------------------+
-//|                                     SMC_Scanner_VisualFix.mq5     |
+//|                                     SMC_Scanner_PureSimple.mq5    |
 //|                                     Copyright 2024, TradingViewEA |
-//|                                     Logic: Better Arrow placement |
+//|                                     Logic: Highest High & Sweep   |
 //+------------------------------------------------------------------+
 #property copyright "Trader77974"
-#property version   "5.10"
+#property version   "8.00"
 #property strict
 
-//--- INPUTS
-input int               InpFractalBars = 5;          
-input int               InpLookBack    = 300;        
-input bool              InpUseAlert    = true;       
-input bool              InpDrawRemote  = true;       
-input color             InpColorHigh   = clrRed;     
-input color             InpColorLow    = clrDodgerBlue; 
-input color             InpColorSweep  = clrMagenta; 
+//--- PARAMÈTRES SIMPLES
+input int    InpFractalBars = 5;    // Sensibilité pour définir un sommet (5 est standard)
+input int    InpLookBack    = 300;  // Combien de bougies on regarde en arrière
+input bool   InpUseAlert    = true; // Activer les alertes
+input bool   InpDrawRemote  = true; // Dessiner les lignes
+
+// Couleurs
+input color  InpColorHigh   = clrRed;
+input color  InpColorLow    = clrDodgerBlue;
+input color  InpColorSweep  = clrMagenta;
 
 //--- GLOBALS
-struct SymbolState {
-   string symbol;
-   datetime lastAlertTime;
-};
+struct SymbolState { string symbol; datetime lastAlertTime; };
 SymbolState alerts[];
-const string PREFIX = "SMC_Auto_"; 
+const string PREFIX = "SMC_Simple_"; 
 
 //+------------------------------------------------------------------+
-//| OnInit & Timer                                                   |
+//| Initialisation                                                   |
 //+------------------------------------------------------------------+
 int OnInit() {
-   EventSetTimer(5);
-   Print("SMC Scanner: Fix Visuel Flèche activé.");
+   EventSetTimer(5); // Scan toutes les 5 secondes
    return(INIT_SUCCEEDED);
 }
+
 void OnDeinit(const int reason) { EventKillTimer(); }
+
 void OnTimer() {
    for(int i = 0; i < SymbolsTotal(true); i++)
       ScanSymbol(SymbolName(i, true));
 }
 
 //+------------------------------------------------------------------+
-//| LOGIQUE SCANNER                                                  |
+//| LA LOGIQUE PURE                                                  |
 //+------------------------------------------------------------------+
 void ScanSymbol(string sym)
 {
    MqlRates rates[];
    ArraySetAsSeries(rates, true);
    
+   // On récupère les données
    int copied = CopyRates(sym, _Period, 0, InpLookBack + 10, rates);
    if(copied < InpLookBack) return;
 
-   // 1. HIGH
-   int bestHighIndex = -1;
-   double maxHighPrice = -1.0;
-   double currentHigh = rates[0].high;
+   // -------------------------------------------------------
+   // ÉTAPE 1 : TROUVER LE SOMMET MAJEUR (Le plus haut Fractal)
+   // -------------------------------------------------------
+   int highestIndex = -1;
+   double highestPrice = -1.0;
    
-   for(int i = 3; i < InpLookBack; i++) {
-      if(IsFractalUp(rates, i)) {
-         if(rates[i].high < currentHigh) {
-             if(rates[i].high > maxHighPrice) {
-                 maxHighPrice = rates[i].high;
-                 bestHighIndex = i;
-             }
+   // On parcourt l'historique pour trouver le BOSS (le plus haut sommet)
+   // On ignore les 2 premières bougies pour s'assurer que le fractal est bien formé
+   for(int i = 3; i < InpLookBack; i++)
+   {
+      if(IsFractalUp(rates, i))
+      {
+         // On cherche simplement le plus haut de la période
+         // Mais il doit être EN DESSOUS du prix actuel ou PROCHE (pour être sweepé maintenant)
+         // Ici, on prend le plus haut tout court dans l'historique visible.
+         if(rates[i].high > highestPrice)
+         {
+            highestPrice = rates[i].high;
+            highestIndex = i;
          }
       }
    }
-   if(bestHighIndex == -1) return;
+   
+   if(highestIndex == -1) return; // Pas de sommet trouvé
 
-   int highIndex = bestHighIndex;
-   double highPrice = maxHighPrice;
-   datetime highTime = rates[bestHighIndex].time;
+   // -------------------------------------------------------
+   // ÉTAPE 2 : VÉRIFIER SI ON EST EN TRAIN DE LE CASSER
+   // -------------------------------------------------------
+   double currentPrice = rates[0].high; // Prix actuel (Mèche)
+   
+   // Si le sommet trouvé est BEAUCOUP plus haut que le prix actuel, on n'y est pas encore.
+   // On ne s'intéresse qu'aux cas où le prix actuel est entrain de dépasser ce sommet.
+   if(currentPrice < highestPrice) return; 
 
-   // 2. LOW
-   int bestLowIndex = -1;
-   double minLowPrice = DBL_MAX; 
-   for(int i = 2; i < highIndex; i++) {
-      if(IsFractalDown(rates, i)) {
-         if(rates[i].low < minLowPrice) {
-            minLowPrice = rates[i].low;
-            bestLowIndex = i;
-         }
+   // -------------------------------------------------------
+   // ÉTAPE 3 : TROUVER LE CREUX (TARGET)
+   // -------------------------------------------------------
+   // Le creux doit être entre le Sommet Majeur et Maintenant
+   int lowestIndex = -1;
+   double lowestPrice = DBL_MAX;
+   
+   for(int i = 1; i < highestIndex; i++)
+   {
+      // On cherche le point le plus bas absolu dans cette zone
+      if(rates[i].low < lowestPrice)
+      {
+         lowestPrice = rates[i].low;
+         lowestIndex = i;
       }
    }
-   if(bestLowIndex == -1) return;
+   
+   if(lowestIndex == -1) return;
+   
+   // Si le prix a déjà cassé le bas, le setup est invalidé (déjà fini)
+   if(rates[0].close < lowestPrice) return;
 
-   double lowPrice = minLowPrice;
-   datetime lowTime = rates[bestLowIndex].time;
-
-   // 3. SWEEP
-   bool isFreshSweep = false;
-   datetime sweepTime = rates[0].time;
-   double sweepHighPoint = rates[0].high;
-
-   if(rates[0].high > highPrice) isFreshSweep = true;
-   if(rates[0].close < lowPrice) return;
-
-   // 4. EXECUTION
-   if(isFreshSweep)
+   // -------------------------------------------------------
+   // ÉTAPE 4 : DESSINER ET ALERTER
+   // -------------------------------------------------------
+   
+   // On vérifie que c'est une cassure "fraîche" (la bougie précédente était en dessous ou proche)
+   // Cela évite de spammer si le prix est au-dessus depuis 50 bougies.
+   bool isFresh = false;
+   if(rates[1].high <= highestPrice || rates[0].high > highestPrice) isFresh = true;
+   
+   if(isFresh)
    {
       if(InpDrawRemote)
-         DrawOnAllCharts(sym, highTime, highPrice, lowTime, lowPrice, sweepTime, sweepHighPoint);
+         DrawOnAllCharts(sym, rates[highestIndex].time, highestPrice, rates[lowestIndex].time, lowestPrice, rates[0].time, rates[0].high);
 
       if(!IsAlertedRecently(sym, rates[0].time))
       {
-         string msg = "SMC SWEEP: " + sym + "\nHigh Broken: " + DoubleToString(highPrice, _Digits);
+         string msg = "LIQUIDITY SWEEP: " + sym + "\nHigh: " + DoubleToString(highestPrice, _Digits);
          if(InpUseAlert) Alert(msg);
          RegisterAlert(sym, rates[0].time);
       }
@@ -110,7 +130,7 @@ void ScanSymbol(string sym)
 }
 
 //+------------------------------------------------------------------+
-//| DESSIN (CORRECTION FLÈCHE ICI)                                   |
+//| FONCTIONS GRAPHIQUES (Lignes & Flèches)                          |
 //+------------------------------------------------------------------+
 void DrawOnAllCharts(string symbol, datetime tHigh, double pHigh, datetime tLow, double pLow, datetime tSweep, double pSweepHigh)
 {
@@ -119,7 +139,7 @@ void DrawOnAllCharts(string symbol, datetime tHigh, double pHigh, datetime tLow,
    {
       if(ChartSymbol(chartID) == symbol)
       {
-         // 1. High Line
+         // 1. Ligne ROUGE (High)
          string objHigh = PREFIX + "High";
          if(ObjectFind(chartID, objHigh) < 0) ObjectCreate(chartID, objHigh, OBJ_TREND, 0, tHigh, pHigh, tSweep, pHigh);
          else { 
@@ -128,8 +148,9 @@ void DrawOnAllCharts(string symbol, datetime tHigh, double pHigh, datetime tLow,
          }
          ObjectSetInteger(chartID, objHigh, OBJPROP_COLOR, InpColorHigh);
          ObjectSetInteger(chartID, objHigh, OBJPROP_STYLE, STYLE_DOT);
+         ObjectSetInteger(chartID, objHigh, OBJPROP_RAY_RIGHT, false);
 
-         // 2. Low Target
+         // 2. Ligne BLEUE (Target)
          string objLow = PREFIX + "Target";
          datetime futureTime = TimeCurrent() + PeriodSeconds(_Period) * 50; 
          if(ObjectFind(chartID, objLow) < 0) ObjectCreate(chartID, objLow, OBJ_TREND, 0, tLow, pLow, futureTime, pLow);
@@ -139,27 +160,18 @@ void DrawOnAllCharts(string symbol, datetime tHigh, double pHigh, datetime tLow,
          }
          ObjectSetInteger(chartID, objLow, OBJPROP_COLOR, InpColorLow);
          ObjectSetInteger(chartID, objLow, OBJPROP_RAY_RIGHT, true);
-         ObjectSetString(chartID, objLow, OBJPROP_TEXT, "TARGET");
 
-         // 3. FLÈCHE (CORRECTION VISUELLE)
+         // 3. Flèche (Calcul d'écart universel)
          string objArrow = PREFIX + "Signal";
-         
-         // Calcul d'un écart proportionnel (0.05% du prix) pour être toujours visible mais pas trop loin
-         // Sur le Gold (2600), ça fait ~1.3 points d'écart. Sur EURUSD, ~0.0005.
-         double gap = pSweepHigh * 0.0005; 
+         double gap = GetDynamicGap(pSweepHigh);
          
          if(ObjectFind(chartID, objArrow) < 0) ObjectCreate(chartID, objArrow, OBJ_ARROW_DOWN, 0, tSweep, pSweepHigh + gap);
          else { 
             ObjectSetInteger(chartID, objArrow, OBJPROP_TIME, 0, tSweep); 
             ObjectSetDouble(chartID, objArrow, OBJPROP_PRICE, 0, pSweepHigh + gap); 
          }
-         
          ObjectSetInteger(chartID, objArrow, OBJPROP_COLOR, InpColorSweep);
          ObjectSetInteger(chartID, objArrow, OBJPROP_WIDTH, 3);
-         
-         // IMPORTANT: On ancre le BAS de la flèche sur le point défini.
-         // Comme c'est une flèche vers le bas, la pointe sera exactement à (High + gap)
-         // Le corps de la flèche sera au-dessus.
          ObjectSetInteger(chartID, objArrow, OBJPROP_ANCHOR, ANCHOR_BOTTOM);
 
          ChartRedraw(chartID);
@@ -169,11 +181,21 @@ void DrawOnAllCharts(string symbol, datetime tHigh, double pHigh, datetime tLow,
 }
 
 //+------------------------------------------------------------------+
-//| HELPERS                                                          |
+//| UTILS                                                            |
 //+------------------------------------------------------------------+
+double GetDynamicGap(double price) {
+   // Ajuste la position de la flèche selon la taille du prix (Crypto vs Forex vs Gold)
+   double percent = 0.0005; 
+   if(price < 500) percent = 0.002;
+   if(price < 10) percent = 0.01;
+   if(price < 0.1) percent = 0.03; 
+   return price * percent;
+}
+
 bool IsFractalUp(MqlRates &rates[], int index) {
    if(index < InpFractalBars || index > ArraySize(rates) - InpFractalBars - 1) return false;
    double center = rates[index].high;
+   // Le fractal doit être le plus haut des X barres à gauche et à droite
    for(int i = 1; i <= InpFractalBars; i++) {
       if(rates[index - i].high >= center) return false;
       if(rates[index + i].high >= center) return false;
@@ -181,35 +203,14 @@ bool IsFractalUp(MqlRates &rates[], int index) {
    return true;
 }
 
-bool IsFractalDown(MqlRates &rates[], int index) {
-   if(index < InpFractalBars || index > ArraySize(rates) - InpFractalBars - 1) return false;
-   double center = rates[index].low;
-   for(int i = 1; i <= InpFractalBars; i++) {
-      if(rates[index - i].low <= center) return false;
-      if(rates[index + i].low <= center) return false;
-   }
-   return true;
-}
-
 bool IsAlertedRecently(string sym, datetime barTime) {
-   for(int i=0; i<ArraySize(alerts); i++) {
-      if(alerts[i].symbol == sym) {
-         if(alerts[i].lastAlertTime == barTime) return true;
-         return false;
-      }
-   }
+   for(int i=0; i<ArraySize(alerts); i++) if(alerts[i].symbol == sym && alerts[i].lastAlertTime == barTime) return true;
    return false;
 }
 
 void RegisterAlert(string sym, datetime barTime) {
    for(int i=0; i<ArraySize(alerts); i++) {
-      if(alerts[i].symbol == sym) {
-         alerts[i].lastAlertTime = barTime;
-         return;
-      }
+       if(alerts[i].symbol == sym) { alerts[i].lastAlertTime = barTime; return; }
    }
-   int s = ArraySize(alerts);
-   ArrayResize(alerts, s+1);
-   alerts[s].symbol = sym;
-   alerts[s].lastAlertTime = barTime;
+   int s = ArraySize(alerts); ArrayResize(alerts, s+1); alerts[s].symbol = sym; alerts[s].lastAlertTime = barTime;
 }
