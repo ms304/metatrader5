@@ -1,4 +1,4 @@
-C'est une excellente idée. Pour répliquer ce qui s'est passé aujourd'hui (le "Turtle Soup" suivi d'un déplacement), nous devons traduire des concepts visuels en règles mathématiques strictes.
+Pour répliquer ce qui s'est passé aujourd'hui le 22/01/2026 (le "Turtle Soup" suivi d'un déplacement), nous devons traduire des concepts visuels en règles mathématiques strictes.
 
 Voici un Expert Advisor (EA) complet pour MT5 qui automatise la détection du setup **SMC (Liquidity Sweep + Rejection + Displacement)**.
 
