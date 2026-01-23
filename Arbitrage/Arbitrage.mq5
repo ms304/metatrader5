@@ -1,29 +1,31 @@
 //+------------------------------------------------------------------+
-//|                                   MarketWatch_Arbi_Scanner.mq5   |
+//|                                   MarketWatch_Arbi_Scanner_V4.mq5|
 //|                                  Copyright 2024, Trading AI Corp |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2024"
-#property version   "2.00"
+#property version   "3.01"
 #property strict
 
 // Structure pour définir un triangle de devises
 struct Triangle {
-   string s1, s2, s3;      // Noms des symboles (ex: EURUSD)
-   string c1, c2, c3;      // Noms des devises (ex: EUR, USD, GBP)
+   string s1, s2, s3;      
+   string c1;              // Devise de départ
+   datetime lastAlert;     
 };
 
-Triangle Triangles[];      // Tableau des triangles détectés
+Triangle Triangles[];      
 int totalTriangles = 0;
 
-// Paramètres
-input int RefreshMs = 500;       // Vitesse de rafraîchissement (ms)
-input double MinProfit = 0.0001; // Seuil d'affichage (0.01%)
+// --- Paramètres d'entrée
+input int    RefreshMs = 500;            // Rafraîchissement (ms)
+input double MinProfitAlert = 0.0001;    // Seuil d'alerte (0.0001 = 0.01%)
+input int    AlertCooldownSeconds = 60;  // Attendre X sec avant de relogger le même triangle
 
 //+------------------------------------------------------------------+
 //| Initialisation                                                   |
 //+------------------------------------------------------------------+
 int OnInit() {
-   Print("Recherche de triangles dans le MarketWatch...");
+   Print("--- Démarrage du Scanner d'Arbitrage V4 ---");
    FindTriangles();
    EventSetMillisecondTimer(RefreshMs);
    return(INIT_SUCCEEDED);
@@ -35,52 +37,59 @@ void OnDeinit(const int reason) {
 }
 
 void OnTimer() {
-   string output = "--- SCANNER D'ARBITRAGE RÉEL (Triangulaire) ---\n";
+   string output = "--- SCANNER D'ARBITRAGE RÉEL ---\n";
    output += "Triangles surveillés : " + (string)totalTriangles + "\n";
-   output += "Méthode : Simulation Round-Trip (Bid/Ask inclus)\n";
+   output += "Seuil d'alerte : " + DoubleToString(MinProfitAlert * 100, 4) + "%\n";
    output += "----------------------------------------------------------\n";
    
-   int found = 0;
+   int foundCount = 0;
+   datetime now = TimeCurrent();
 
    for(int i = 0; i < totalTriangles; i++) {
       double profit = CalculateRealProfit(Triangles[i]);
       
-      // On affiche si le profit est "réaliste" (entre 0% et 2%)
-      // Si c'est au dessus de 5%, c'est souvent une erreur de cotation du broker
+      // On affiche à l'écran si profit > 0 (mais réaliste < 5%)
       if(profit > 0 && profit < 0.05) { 
-         output += StringFormat("TRI: %s -> %s -> %s | PROFIT: %.4f%%\n", 
+         output += StringFormat("TRI: %s-%s-%s | PROFIT: %.4f%%\n", 
                   Triangles[i].s1, Triangles[i].s2, Triangles[i].s3, profit * 100);
-         found++;
+         foundCount++;
+
+         // LOG DANS LA ZONE EXPERTS
+         if(profit >= MinProfitAlert) {
+            if(now - Triangles[i].lastAlert >= AlertCooldownSeconds) {
+               Print(StringFormat("[ARBITRAGE] %s-%s-%s | Profit: %.4f%%", 
+                     Triangles[i].s1, Triangles[i].s2, Triangles[i].s3, profit * 100));
+               Triangles[i].lastAlert = now;
+            }
+         }
       }
    }
 
-   if(found == 0) output += "\nAucun profit détecté après spreads.\n(C'est normal, le marché est efficient)";
-   
+   if(foundCount == 0) output += "\nAucun profit détecté après spreads.";
    Comment(output);
 }
 
 //+------------------------------------------------------------------+
-//| CALCUL DU PROFIT RÉEL (SIMULATION DE TRANSACTION)               |
+//| CALCUL DU PROFIT RÉEL                                           |
 //+------------------------------------------------------------------+
 double CalculateRealProfit(Triangle &t) {
-   // On part avec 1000 unités de la devise de base du premier symbole
    double amount = 1000.0;
    string currentCur = t.c1; 
 
-   // Étape 1 : Passer par le Symbole 1
+   // Simuler les 3 étapes de conversion
    amount = ExecuteTrade(amount, currentCur, t.s1, currentCur);
+   if(amount <= 0) return -1;
    
-   // Étape 2 : Passer par le Symbole 2
    amount = ExecuteTrade(amount, currentCur, t.s2, currentCur);
+   if(amount <= 0) return -1;
    
-   // Étape 3 : Revenir à la devise de départ par le Symbole 3
    amount = ExecuteTrade(amount, currentCur, t.s3, currentCur);
+   if(amount <= 0) return -1;
 
-   // Retourne le gain ou la perte en pourcentage
    return (amount / 1000.0) - 1.0;
 }
 
-// Fonction qui simule la conversion d'une monnaie à une autre sur un symbole
+// Fonction de simulation de transaction corrigée
 double ExecuteTrade(double amount, string fromCur, string symbol, string &toCur) {
    MqlTick tick;
    if(!SymbolInfoTick(symbol, tick) || tick.ask <= 0) return 0;
@@ -89,20 +98,18 @@ double ExecuteTrade(double amount, string fromCur, string symbol, string &toCur)
    string profit = SymbolInfoString(symbol, SYMBOL_CURRENCY_PROFIT);
 
    if(fromCur == base) {
-      // On vend la base pour obtenir la devise de profit (ex: EUR -> USD)
       toCur = profit;
-      return amount * tick.bid;
+      return amount * tick.bid; // Vente de la base
    } 
    else if(fromCur == profit) {
-      // On achète la base avec la devise de profit (ex: USD -> EUR)
       toCur = base;
-      return amount / tick.ask;
+      return amount / tick.ask; // Achat de la base
    }
    return 0;
 }
 
 //+------------------------------------------------------------------+
-//| RECHERCHE AUTOMATIQUE DES TRIANGLES                             |
+//| RECHERCHE DES TRIANGLES                                         |
 //+------------------------------------------------------------------+
 void FindTriangles() {
    int total = SymbolsTotal(true);
@@ -120,7 +127,6 @@ void FindTriangles() {
          string b2 = SymbolInfoString(s2, SYMBOL_CURRENCY_BASE);
          string q2 = SymbolInfoString(s2, SYMBOL_CURRENCY_PROFIT);
 
-         // Si s1 et s2 partagent une devise
          if(b1 == b2 || b1 == q2 || q1 == b2 || q1 == q2) {
             for(int k = 0; k < total; k++) {
                string s3 = SymbolName(k, true);
@@ -132,7 +138,8 @@ void FindTriangles() {
                      Triangles[totalTriangles].s1 = s1;
                      Triangles[totalTriangles].s2 = s2;
                      Triangles[totalTriangles].s3 = s3;
-                     Triangles[totalTriangles].c1 = b1; // On stocke la devise de départ
+                     Triangles[totalTriangles].c1 = b1; 
+                     Triangles[totalTriangles].lastAlert = 0;
                      totalTriangles++;
                   }
                }
@@ -140,7 +147,7 @@ void FindTriangles() {
          }
       }
    }
-   Print("Scan terminé. Triangles trouvés : ", totalTriangles);
+   Print("Scan terminé. ", totalTriangles, " triangles identifiés.");
 }
 
 bool IsValidTriangle(string s1, string s2, string s3) {
@@ -155,7 +162,7 @@ bool IsValidTriangle(string s1, string s2, string s3) {
    for(int i=0; i<6; i++) {
       int count = 0;
       for(int j=0; j<6; j++) if(c[i] == c[j]) count++;
-      if(count != 2) return false; // Chaque devise doit apparaître exactement 2 fois
+      if(count != 2) return false;
    }
    return true;
 }
