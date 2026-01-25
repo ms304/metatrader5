@@ -1,6 +1,6 @@
 //+------------------------------------------------------------------+
 //|                                     ICT_Silver_Bullet_Scanner.mq5 |
-//|                                     Copyright 2023, Silver Bullet Logic   |
+//|                                     Copyright 2026, Silver Bullet Logic   |
 //|                                             Based on ICT Concepts         |
 //+------------------------------------------------------------------+
 #property copyright "mc0d3 t0w3rbu5t3r"
