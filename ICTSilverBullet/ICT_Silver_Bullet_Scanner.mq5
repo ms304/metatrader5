@@ -1,31 +1,32 @@
 //+------------------------------------------------------------------+
-//|                                             ICT_Silver_Bullet_Scanner.mq5 |
-//|                                     Copyright 2026, Silver Bullet Logic   |
+//|                                     ICT_Silver_Bullet_Scanner.mq5 |
+//|                                     Copyright 2023, Silver Bullet Logic   |
 //|                                             Based on ICT Concepts         |
 //+------------------------------------------------------------------+
-#property copyright "t0w3rbu5t3r"
+#property copyright "mc0d3 t0w3rbu5t3r"
 #property link      ""
 #property version   "1.00"
 #property strict
 
-//--- INPUTS
+//--- INPUTS ---
 input group "Time Settings"
-input int      InpBrokerHourFor10AM = 17;    // What hour is it on your Broker when it is 10:00 AM New York?
-input ENUM_TIMEFRAMES InpTimeframe  = PERIOD_M5; // Timeframe to Scan (M1 or M5 recommended)
+input int      InpBrokerHourFor10AM = 17;    // Broker Hour when it is 10:00 AM New York (Crucial!)
+input ENUM_TIMEFRAMES InpTimeframe  = PERIOD_M5; // Timeframe to Scan (M1, M5 recommended)
 
 input group "Setup Configuration"
-input double   InpMinFVGSizePoints  = 1.0;   // Minimum FVG size (in Points/Pips) to trigger alert
+input double   InpMinFVGSizePoints  = 1.0;   // Minimum Gap Size (Points) to trigger alert
 
 input group "Alerts"
 input bool     InpAlertPopUp        = true;  // Alert: Pop-up Window
 input bool     InpAlertPush         = true;  // Alert: Mobile Push Notification
-input bool     InpAlertSound        = false; // Alert: Sound
+input bool     InpAlertSound        = true;  // Alert: Sound
 
-//--- GLOBAL VARIABLES
+//--- GLOBAL VARIABLES ---
 int NY_3AM_Hour;
 int NY_10AM_Hour;
 int NY_2PM_Hour;
 
+// Structure to track alerts so we don't spam the same bar
 struct SymbolState {
    string symbol;
    datetime lastAlertBarTime;
@@ -37,8 +38,8 @@ SymbolState alertHistory[];
 //+------------------------------------------------------------------+
 int OnInit()
   {
-   // Calculate the Broker Hours for the Silver Bullet Windows based on user reference
-   // User inputs the hour for 10AM NY. 
+   // --- CALCULATE TIME WINDOWS ---
+   // 10 AM NY is the reference point.
    // 3 AM NY is 7 hours before 10 AM.
    // 2 PM (14:00) NY is 4 hours after 10 AM.
    
@@ -46,17 +47,23 @@ int OnInit()
    NY_3AM_Hour  = InpBrokerHourFor10AM - 7;
    NY_2PM_Hour  = InpBrokerHourFor10AM + 4;
    
-   // Handle day rollover (if 3AM is previous day in broker time, though rare for standard UTC+2/3)
+   // Adjust for day rollover (e.g., if calculation results in negative hour)
    if(NY_3AM_Hour < 0) NY_3AM_Hour += 24;
-   if(NY_2PM_Hour >= 24) NY_2PM_Hour -= 24;
-
-   Print("--- ICT SILVER BULLET SCANNER STARTED ---");
-   Print("Scanning for 3 AM NY Session at Broker Hour: ", NY_3AM_Hour);
-   Print("Scanning for 10 AM NY Session at Broker Hour: ", NY_10AM_Hour);
-   Print("Scanning for 2 PM NY Session at Broker Hour: ", NY_2PM_Hour);
+   if(NY_3AM_Hour >= 24) NY_3AM_Hour -= 24;
    
-   // Initialize Timer to scan every 10 seconds
-   EventSetTimer(10);
+   if(NY_2PM_Hour < 0) NY_2PM_Hour += 24;
+   if(NY_2PM_Hour >= 24) NY_2PM_Hour -= 24;
+   
+   if(NY_10AM_Hour >= 24) NY_10AM_Hour -= 24;
+
+   Print("--- ICT SILVER BULLET REAL-TIME SCANNER STARTED ---");
+   Print("Scanning timeframe: ", EnumToString(InpTimeframe));
+   Print("London Open SB (3AM NY) starts at Broker Hour: ", NY_3AM_Hour);
+   Print("AM Session SB (10AM NY) starts at Broker Hour: ", NY_10AM_Hour);
+   Print("PM Session SB (2PM NY) starts at Broker Hour: ", NY_2PM_Hour);
+   
+   // Set Timer to scan every 5 seconds
+   EventSetTimer(5);
    
    return(INIT_SUCCEEDED);
   }
@@ -74,11 +81,12 @@ void OnDeinit(const int reason)
 //+------------------------------------------------------------------+
 void OnTimer()
   {
-   // 1. Check if we are currently in a Silver Bullet Hour
+   // 1. Get Current Broker Time
    datetime currentTime = TimeCurrent();
    MqlDateTime tm;
    TimeToStruct(currentTime, tm);
    
+   // 2. Check if we are in a Silver Bullet Window
    bool isSilverBullet = false;
    string sessionName = "";
    
@@ -95,70 +103,79 @@ void OnTimer()
       sessionName = "PM Session SB";
    }
    
-   if(!isSilverBullet) return; // Exit if not in the time window
+   // If not in time window, stop scanning to save resources
+   if(!isSilverBullet) return; 
 
-   // 2. Loop through Market Watch Symbols
+   // 3. Loop through Market Watch Symbols
    int total = SymbolsTotal(true); // true = only visible in Market Watch
    
    for(int i = 0; i < total; i++)
      {
       string symbol = SymbolName(i, true);
-      ScanSymbolForFVG(symbol, sessionName);
+      ScanSymbolForRealTimeFVG(symbol, sessionName);
      }
   }
 
 //+------------------------------------------------------------------+
-//| Logic to Detect FVG                                              |
+//| Logic to Detect FVG (REAL-TIME / DURING FORMATION)               |
 //+------------------------------------------------------------------+
-void ScanSymbolForFVG(string symbol, string session)
+void ScanSymbolForRealTimeFVG(string symbol, string session)
   {
    MqlRates rates[];
    ArraySetAsSeries(rates, true);
    
-   // Get last 4 candles. Index 0 is currently forming. Index 1, 2, 3 make the potential FVG.
-   // We scan based on Completed Candles (1, 2, 3)
-   if(CopyRates(symbol, InpTimeframe, 0, 4, rates) < 4) return;
+   // Get last 3 candles.
+   // Index 0 = Current Live Candle (Candle 3)
+   // Index 1 = Previous Closed Candle (Displacement)
+   // Index 2 = Origin Candle (Candle 1)
+   if(CopyRates(symbol, InpTimeframe, 0, 3, rates) < 3) return;
    
-   // We check if we already alerted this specific bar for this symbol
-   if(IsAlreadyAlerted(symbol, rates[1].time)) return;
+   // Check history to prevent spamming alerts for the same candle
+   if(IsAlreadyAlerted(symbol, rates[0].time)) return;
 
    double point = SymbolInfoDouble(symbol, SYMBOL_POINT);
    
    // --- BULLISH FVG LOGIC ---
-   // Candle 3 High < Candle 1 Low (Gap exists)
-   // Candle 2 is the displacement candle
-   if(rates[3].high < rates[1].low)
+   // We look for a gap between Candle 1 High and Current Candle Low
+   // Pattern: [Candle 1 High] < GAP < [Current Candle Low]
+   if(rates[2].high < rates[0].low) 
      {
-      double gapSize = rates[1].low - rates[3].high;
+      double gapSize = rates[0].low - rates[2].high;
+      
+      // Filter by minimum size
       if(gapSize >= InpMinFVGSizePoints * point)
         {
          string msg = "🟢 BULLISH Silver Bullet (" + session + ")\n" + 
-                      symbol + " on " + EnumToString(InpTimeframe) + "\n" +
-                      "FVG Formed. Look for longs.";
+                      symbol + " (" + EnumToString(InpTimeframe) + ")\n" +
+                      "Setup forming NOW (Real-Time).";
+         
          SendAlerts(msg);
-         AddToHistory(symbol, rates[1].time);
+         AddToHistory(symbol, rates[0].time);
         }
      }
 
    // --- BEARISH FVG LOGIC ---
-   // Candle 3 Low > Candle 1 High (Gap exists)
-   // Candle 2 is the displacement candle
-   if(rates[3].low > rates[1].high)
+   // We look for a gap between Candle 1 Low and Current Candle High
+   // Pattern: [Current Candle High] < GAP < [Candle 1 Low]
+   if(rates[2].low > rates[0].high) 
      {
-      double gapSize = rates[3].low - rates[1].high;
+      double gapSize = rates[2].low - rates[0].high;
+      
+      // Filter by minimum size
       if(gapSize >= InpMinFVGSizePoints * point)
         {
          string msg = "🔴 BEARISH Silver Bullet (" + session + ")\n" + 
-                      symbol + " on " + EnumToString(InpTimeframe) + "\n" +
-                      "FVG Formed. Look for shorts.";
+                      symbol + " (" + EnumToString(InpTimeframe) + ")\n" +
+                      "Setup forming NOW (Real-Time).";
+         
          SendAlerts(msg);
-         AddToHistory(symbol, rates[1].time);
+         AddToHistory(symbol, rates[0].time);
         }
      }
   }
 
 //+------------------------------------------------------------------+
-//| Helper: Prevent duplicate alerts for the same candle             |
+//| Helper: Prevent duplicate alerts for the same bar time           |
 //+------------------------------------------------------------------+
 bool IsAlreadyAlerted(string symbol, datetime time)
   {
@@ -166,16 +183,17 @@ bool IsAlreadyAlerted(string symbol, datetime time)
      {
       if(alertHistory[i].symbol == symbol)
         {
+         // If we matched symbol and time, we already alerted
          if(alertHistory[i].lastAlertBarTime == time) return true;
-         return false;
+         return false; // Symbol found but time is new, so not alerted yet
         }
      }
-   return false;
+   return false; // Symbol not in history
   }
 
 void AddToHistory(string symbol, datetime time)
   {
-   // Check if symbol exists in array, update it
+   // Update existing symbol entry
    for(int i=0; i<ArraySize(alertHistory); i++)
      {
       if(alertHistory[i].symbol == symbol)
@@ -185,7 +203,7 @@ void AddToHistory(string symbol, datetime time)
         }
      }
    
-   // If new symbol, resize array and add
+   // Add new symbol entry
    int size = ArraySize(alertHistory);
    ArrayResize(alertHistory, size + 1);
    alertHistory[size].symbol = symbol;
