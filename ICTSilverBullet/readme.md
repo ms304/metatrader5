@@ -1,4 +1,4 @@
-Based on the transcript provided, here is the complete breakdown of the **ICT Silver Bullet** trading model. This is a time-based algorithmic trading strategy designed to be a high-probability, repeatable setup that forms every single trading day.
+Here is the complete breakdown of the **ICT Silver Bullet** trading model. This is a time-based algorithmic trading strategy designed to be a high-probability, repeatable setup that forms every single trading day.
 
 ### **1. Core Parameters**
 *   **Asset Class:** Works on all assets (Indices, Forex, Futures).
