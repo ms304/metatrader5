@@ -2,7 +2,7 @@
 //|                                    ICT_Last_FVG_Only_EA.mq5      |
 //|                        Version Optimisée Temps Réel              |
 //+------------------------------------------------------------------+
-#property copyright "Copyright 2026, mc0d3"
+#property copyright "Copyright 2026, Mc0d3 T0WT0W"
 #property link      "https://www.mql5.com"
 #property version   "1.01"
 #property strict
