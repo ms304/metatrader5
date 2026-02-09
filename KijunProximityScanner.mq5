@@ -5,7 +5,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Didier Le HPI"
 #property link      "https://www.mql5.com"
-#property version   "2.10"
+#property version   "2.20"
 #property strict
 
 //--- INPUTS
@@ -16,20 +16,16 @@ input int      InpSenkou         = 52;     // Senkou Span B
 
 input group "Paramètres du Scanner"
 input string   InpManualSymbols  = "";     // Symboles (ex: EURUSD,GBPUSD) - Vide = Market Watch
-input double   InpThresholdPercent = 0.10; // Seuil d'alerte en % (ex: 0.1)
+input double   InpThresholdPercent = 0.10; // Seuil d'alerte en %
 input int      InpScanSeconds    = 30;     // Fréquence du scan en secondes
 
-input group "Alertes"
-input bool     InpUseAlert       = true;   // Alerte Pop-up
-input bool     InpPrintLog       = true;   // Journal Expert
-input bool     InpUsePush        = false;  // Alerte Push (Mobile)
-
 input group "Interface Graphique"
+input int      InpXOffset        = 20;     // Position X
+input int      InpYOffset        = 20;     // Position Y
 input int      InpFontSize       = 10;     // Taille police
 input color    InpHeaderColor    = clrYellow; 
-input color    InpRowColor       = clrOrange; // Couleur des détections
-input int      InpXOffset        = 20;     
-input int      InpYOffset        = 20;     
+input color    InpBgColor        = C'30,30,30'; // Couleur du fond (Gris très foncé)
+input int      InpBgWidth        = 450;    // Largeur du panneau
 
 //--- Variables globales
 string g_symbols[];
@@ -43,7 +39,7 @@ int OnInit()
   {
    InitSymbols();
    EventSetTimer(InpScanSeconds);
-   ScanMarket(); // Premier scan
+   ScanMarket(); 
    return(INIT_SUCCEEDED);
   }
 
@@ -82,68 +78,94 @@ void InitSymbols()
 //+------------------------------------------------------------------+
 void ScanMarket()
   {
-   // 1. Nettoyer les anciens objets du tableau avant le nouveau scan
+   // On supprime tout pour reconstruire proprement
    ObjectsDeleteAll(0, g_prefix);
    
-   UpdateDashboardHeader();
+   int detectedCount = 0;
    
-   int detectedCount = 0; // Compteur de lignes affichées
-   
+   // On pré-calcule d'abord les détections pour savoir quelle taille donner au fond
+   struct Result { string sym; double prc; double diff; };
+   Result results[];
+   ArrayResize(results, g_totalSymbols);
+
    for(int i = 0; i < g_totalSymbols; i++)
      {
       string symbol = g_symbols[i];
-      
       double price = SymbolInfoDouble(symbol, SYMBOL_BID);
       if(price <= 0) continue;
 
       double kijunValue = GetKijunValue(symbol);
       if(kijunValue <= 0) continue;
       
-      // Calcul de l'écart en %
       double deviationPercent = ((price - kijunValue) / price) * 100.0;
       
-      // --- FILTRE : On n'affiche que si on est sous le seuil ---
       if(MathAbs(deviationPercent) <= InpThresholdPercent)
         {
-         // Ajout au tableau visuel
-         UpdateDashboardRow(detectedCount, symbol, price, deviationPercent);
+         results[detectedCount].sym = symbol;
+         results[detectedCount].prc = price;
+         results[detectedCount].diff = deviationPercent;
          detectedCount++;
-
-         // Alertes (optionnel : une seule fois par bougie ou par scan)
-         string msg = StringFormat("KIJUN : %s proche (%.3f%%)", symbol, deviationPercent);
-         if(InpPrintLog) Print(msg);
-         // Note: Alerte Pop-up peut être très répétitive ici si InpScanSeconds est bas
         }
      }
+
+   // --- DESSIN DU FOND ---
+   int lineH = InpFontSize + 8;
+   int bgHeight = 40 + (MathMax(1, detectedCount) * lineH);
+   CreateBackground(InpXOffset - 5, InpYOffset - 5, InpBgWidth, bgHeight);
+
+   // --- DESSIN DES TEXTES ---
+   UpdateDashboardHeader();
    
-   // Si rien n'est trouvé
    if(detectedCount == 0)
      {
-      CreateLabel(g_prefix+"none", "Aucun symbole sous le seuil " + DoubleToString(InpThresholdPercent, 2) + "%", InpXOffset, InpYOffset + 25, clrGray);
+      CreateLabel(g_prefix+"none", "Aucune détection (Seuil " + DoubleToString(InpThresholdPercent, 2) + "%)", InpXOffset, InpYOffset + 30, clrGray);
+     }
+   else
+     {
+      for(int j = 0; j < detectedCount; j++)
+        {
+         UpdateDashboardRow(j, results[j].sym, results[j].prc, results[j].diff);
+        }
      }
      
    ChartRedraw();
   }
 
 //+------------------------------------------------------------------+
-//| Interface Graphique                                              |
+//| Interface Graphique - Fond                                       |
 //+------------------------------------------------------------------+
+void CreateBackground(int x, int y, int w, int h)
+  {
+   string name = g_prefix + "bg";
+   if(ObjectCreate(0, name, OBJ_RECTANGLE_LABEL, 0, 0, 0))
+     {
+      ObjectSetInteger(0, name, OBJPROP_XDISTANCE, x);
+      ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y);
+      ObjectSetInteger(0, name, OBJPROP_XSIZE, w);
+      ObjectSetInteger(0, name, OBJPROP_YSIZE, h);
+      ObjectSetInteger(0, name, OBJPROP_BGCOLOR, InpBgColor);
+      ObjectSetInteger(0, name, OBJPROP_BORDER_TYPE, BORDER_FLAT);
+      ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+      ObjectSetInteger(0, name, OBJPROP_BACK, false); // Pour être derrière le texte
+      ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+      ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
+     }
+  }
+
 void UpdateDashboardHeader()
   {
-   string text = StringFormat("SYMBOLES PROCHES KIJUN (Seuil: %.2f%%)", InpThresholdPercent);
-   CreateLabel(g_prefix+"header", text, InpXOffset, InpYOffset, InpHeaderColor);
-   CreateLabel(g_prefix+"header2", "--------------------------------------------------", InpXOffset, InpYOffset+15, InpHeaderColor);
+   string text = StringFormat("SCANNER KIJUN (Seuil: %.2f%%)", InpThresholdPercent);
+   CreateLabel(g_prefix+"h1", text, InpXOffset, InpYOffset, InpHeaderColor);
+   CreateLabel(g_prefix+"h2", "--------------------------------------------------", InpXOffset, InpYOffset+15, InpHeaderColor);
   }
 
 void UpdateDashboardRow(int rowIdx, string symbol, double price, double diff)
   {
-   // rowIdx permet d'empiler les lignes sans trous
-   int y = InpYOffset + 30 + (rowIdx * (InpFontSize + 6));
-   
-   string trend = (diff > 0) ? "AU-DESSUS" : "EN-DESSOUS";
+   int y = InpYOffset + 35 + (rowIdx * (InpFontSize + 8));
+   string trend = (diff > 0) ? "HAUT" : "BAS ";
    color  txtColor = (diff > 0) ? clrLime : clrRed;
    
-   string text = StringFormat("%-10s | Prix: %-9.5f | Écart: %+.3f%% | %s", 
+   string text = StringFormat("%-10s | %-9.5f | %+.3f%% | %s", 
                               symbol, price, diff, trend);
    
    CreateLabel(g_prefix + "row_" + (string)rowIdx, text, InpXOffset, y, txtColor);
@@ -159,8 +181,8 @@ void CreateLabel(string name, string text, int x, int y, color clr)
       ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
       ObjectSetInteger(0, name, OBJPROP_FONTSIZE, InpFontSize);
       ObjectSetString(0, name, OBJPROP_FONT, "Courier New");
+      ObjectSetInteger(0, name, OBJPROP_ZORDER, 1); // Assure que le texte est au-dessus du fond
       ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
-      ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
      }
   }
 
@@ -171,16 +193,9 @@ double GetKijunValue(string symbol)
   {
    int handle = iIchimoku(symbol, _Period, InpTenkan, InpKijun, InpSenkou);
    if(handle == INVALID_HANDLE) return 0.0;
-   
    double buffer[];
    ArraySetAsSeries(buffer, true);
-   
-   if(CopyBuffer(handle, 1, 0, 1, buffer) <= 0) 
-     {
-      IndicatorRelease(handle);
-      return 0.0;
-     }
-   
+   if(CopyBuffer(handle, 1, 0, 1, buffer) <= 0) { IndicatorRelease(handle); return 0.0; }
    double result = buffer[0];
    IndicatorRelease(handle); 
    return result;
