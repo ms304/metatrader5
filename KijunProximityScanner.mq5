@@ -1,11 +1,11 @@
 //+------------------------------------------------------------------+
 //|                               Scanner_Ichimoku_Percent_Signed.mq5|
-//|                                  Copyright 2026, Assistant IA    |
+//|                                  Copyright 2026, Didier Le HPI    |
 //|                                       https://www.mql5.com       |
 //+------------------------------------------------------------------+
-#property copyright "t0"
+#property copyright "Didier Le HPI"
 #property link      "https://www.mql5.com"
-#property version   "1.20"
+#property version   "2.10"
 #property strict
 
 //--- INPUTS
@@ -15,41 +15,66 @@ input int      InpKijun          = 26;     // Kijun-sen
 input int      InpSenkou         = 52;     // Senkou Span B
 
 input group "Paramètres du Scanner"
-input double   InpThresholdPercent = 0.10; // Seuil d'alerte en % (ex: 0.1%)
-input int      InpScanSeconds    = 60;     // Fréquence du scan en secondes
+input string   InpManualSymbols  = "";     // Symboles (ex: EURUSD,GBPUSD) - Vide = Market Watch
+input double   InpThresholdPercent = 0.10; // Seuil d'alerte en % (ex: 0.1)
+input int      InpScanSeconds    = 30;     // Fréquence du scan en secondes
+
+input group "Alertes"
 input bool     InpUseAlert       = true;   // Alerte Pop-up
 input bool     InpPrintLog       = true;   // Journal Expert
+input bool     InpUsePush        = false;  // Alerte Push (Mobile)
+
+input group "Interface Graphique"
+input int      InpFontSize       = 10;     // Taille police
+input color    InpHeaderColor    = clrYellow; 
+input color    InpRowColor       = clrOrange; // Couleur des détections
+input int      InpXOffset        = 20;     
+input int      InpYOffset        = 20;     
 
 //--- Variables globales
-int extTimerId = 0;
+string g_symbols[];
+int    g_totalSymbols = 0;
+string g_prefix = "ScanIchi_";
 
 //+------------------------------------------------------------------+
 //| Initialisation                                                   |
 //+------------------------------------------------------------------+
 int OnInit()
   {
+   InitSymbols();
    EventSetTimer(InpScanSeconds);
-   Print("Scanner Ichimoku (Signé) Démarré.");
-   Print("Seuil: +/- ", InpThresholdPercent, "%");
-   
+   ScanMarket(); // Premier scan
    return(INIT_SUCCEEDED);
   }
 
-//+------------------------------------------------------------------+
-//| Désinitialisation                                                |
-//+------------------------------------------------------------------+
 void OnDeinit(const int reason)
   {
    EventKillTimer();
-   Print("Scanner Arrêté.");
+   ObjectsDeleteAll(0, g_prefix);
   }
 
-//+------------------------------------------------------------------+
-//| Timer                                                            |
-//+------------------------------------------------------------------+
 void OnTimer()
   {
    ScanMarket();
+  }
+
+//+------------------------------------------------------------------+
+//| Initialise la liste des symboles                                 |
+//+------------------------------------------------------------------+
+void InitSymbols()
+  {
+   if(InpManualSymbols != "")
+     {
+      ushort sep = StringGetCharacter(",", 0);
+      StringSplit(InpManualSymbols, sep, g_symbols);
+     }
+   else
+     {
+      int total = SymbolsTotal(true);
+      ArrayResize(g_symbols, total);
+      for(int i=0; i<total; i++) g_symbols[i] = SymbolName(i, true);
+     }
+   g_totalSymbols = ArraySize(g_symbols);
   }
 
 //+------------------------------------------------------------------+
@@ -57,44 +82,85 @@ void OnTimer()
 //+------------------------------------------------------------------+
 void ScanMarket()
   {
-   int totalSymbols = SymbolsTotal(true); 
+   // 1. Nettoyer les anciens objets du tableau avant le nouveau scan
+   ObjectsDeleteAll(0, g_prefix);
    
-   for(int i = 0; i < totalSymbols; i++)
+   UpdateDashboardHeader();
+   
+   int detectedCount = 0; // Compteur de lignes affichées
+   
+   for(int i = 0; i < g_totalSymbols; i++)
      {
-      string symbol = SymbolName(i, true);
+      string symbol = g_symbols[i];
       
       double price = SymbolInfoDouble(symbol, SYMBOL_BID);
       if(price <= 0) continue;
 
       double kijunValue = GetKijunValue(symbol);
-      if(kijunValue == 0) continue; 
+      if(kijunValue <= 0) continue;
       
-      // --- CALCUL DU POURCENTAGE SIGNÉ ---
-      // (Prix - Kijun) / Prix * 100
-      // Si Prix > Kijun, résultat positif. Si Prix < Kijun, résultat négatif.
-      double deviationRaw = price - kijunValue;
-      double deviationPercent = (deviationRaw / price) * 100.0;
+      // Calcul de l'écart en %
+      double deviationPercent = ((price - kijunValue) / price) * 100.0;
       
-      // On vérifie la valeur absolue pour le seuil (pour déclencher l'alerte peu importe le sens)
+      // --- FILTRE : On n'affiche que si on est sous le seuil ---
       if(MathAbs(deviationPercent) <= InpThresholdPercent)
         {
-         string positionDesc;
-         
-         if(deviationPercent > 0) 
-            positionDesc = "AU-DESSUS (Support?)";
-         else if(deviationPercent < 0) 
-            positionDesc = "EN-DESSOUS (Résist.?)";
-         else 
-            positionDesc = "SUR LA KIJUN";
+         // Ajout au tableau visuel
+         UpdateDashboardRow(detectedCount, symbol, price, deviationPercent);
+         detectedCount++;
 
-         // Formatage du message
-         // %.3f affiche 3 décimales. Le "+" force l'affichage du signe plus pour les positifs
-         string msg = StringFormat("SCAN: %s | %s | Écart: %+.3f%% | Prix: %.5f | Kijun: %.5f", 
-                                   symbol, positionDesc, deviationPercent, price, kijunValue);
-         
+         // Alertes (optionnel : une seule fois par bougie ou par scan)
+         string msg = StringFormat("KIJUN : %s proche (%.3f%%)", symbol, deviationPercent);
          if(InpPrintLog) Print(msg);
-         if(InpUseAlert) Alert(msg);
+         // Note: Alerte Pop-up peut être très répétitive ici si InpScanSeconds est bas
         }
+     }
+   
+   // Si rien n'est trouvé
+   if(detectedCount == 0)
+     {
+      CreateLabel(g_prefix+"none", "Aucun symbole sous le seuil " + DoubleToString(InpThresholdPercent, 2) + "%", InpXOffset, InpYOffset + 25, clrGray);
+     }
+     
+   ChartRedraw();
+  }
+
+//+------------------------------------------------------------------+
+//| Interface Graphique                                              |
+//+------------------------------------------------------------------+
+void UpdateDashboardHeader()
+  {
+   string text = StringFormat("SYMBOLES PROCHES KIJUN (Seuil: %.2f%%)", InpThresholdPercent);
+   CreateLabel(g_prefix+"header", text, InpXOffset, InpYOffset, InpHeaderColor);
+   CreateLabel(g_prefix+"header2", "--------------------------------------------------", InpXOffset, InpYOffset+15, InpHeaderColor);
+  }
+
+void UpdateDashboardRow(int rowIdx, string symbol, double price, double diff)
+  {
+   // rowIdx permet d'empiler les lignes sans trous
+   int y = InpYOffset + 30 + (rowIdx * (InpFontSize + 6));
+   
+   string trend = (diff > 0) ? "AU-DESSUS" : "EN-DESSOUS";
+   color  txtColor = (diff > 0) ? clrLime : clrRed;
+   
+   string text = StringFormat("%-10s | Prix: %-9.5f | Écart: %+.3f%% | %s", 
+                              symbol, price, diff, trend);
+   
+   CreateLabel(g_prefix + "row_" + (string)rowIdx, text, InpXOffset, y, txtColor);
+  }
+
+void CreateLabel(string name, string text, int x, int y, color clr)
+  {
+   if(ObjectCreate(0, name, OBJ_LABEL, 0, 0, 0))
+     {
+      ObjectSetString(0, name, OBJPROP_TEXT, text);
+      ObjectSetInteger(0, name, OBJPROP_XDISTANCE, x);
+      ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y);
+      ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
+      ObjectSetInteger(0, name, OBJPROP_FONTSIZE, InpFontSize);
+      ObjectSetString(0, name, OBJPROP_FONT, "Courier New");
+      ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+      ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
      }
   }
 
@@ -103,20 +169,19 @@ void ScanMarket()
 //+------------------------------------------------------------------+
 double GetKijunValue(string symbol)
   {
-   int handle = iIchimoku(symbol, Period(), InpTenkan, InpKijun, InpSenkou);
-   
+   int handle = iIchimoku(symbol, _Period, InpTenkan, InpKijun, InpSenkou);
    if(handle == INVALID_HANDLE) return 0.0;
    
    double buffer[];
    ArraySetAsSeries(buffer, true);
    
-   int copied = CopyBuffer(handle, 1, 0, 1, buffer);
+   if(CopyBuffer(handle, 1, 0, 1, buffer) <= 0) 
+     {
+      IndicatorRelease(handle);
+      return 0.0;
+     }
    
-   double result = 0.0;
-   if(copied > 0) result = buffer[0];
-   
+   double result = buffer[0];
    IndicatorRelease(handle); 
-   
    return result;
   }
-//+------------------------------------------------------------------+
