@@ -1,11 +1,11 @@
 //+------------------------------------------------------------------+
-//|                               Scanner_Ichimoku_Secure.mq5        |
-//|                                  Copyright 2026, Didier le HPI    |
+//|                            KijunScanner_Optimized.mq5            |
+//|                                  Copyright 2026, Didier Le HPI Réunionnais    |
 //|                                       https://www.mql5.com       |
 //+------------------------------------------------------------------+
-#property copyright "Didier Le HPI"
-#property link      "https://www.mql5.com"
-#property version   "2.30"
+#property copyright "Didier Le HPI Réunionnais"
+#property link      "https://www.Didier-Le-HPI-Réunionnais.re"
+#property version   "3.00"
 #property strict
 
 //--- INPUTS
@@ -19,98 +19,150 @@ input string   InpManualSymbols  = "";     // Symboles (ex: EURUSD,GBPUSD) - Vid
 input double   InpThresholdPercent = 0.10; // Seuil d'alerte en %
 input int      InpScanSeconds    = 30;     // Fréquence du scan en secondes
 
+input group "Gestion de la Mémoire (RAM)"
+input int      InpMemWarningMB   = 500;    // Alerte RAM (Mo) - Orange
+input int      InpMemPauseMB     = 800;    // Pause Scan (Mo) - Rouge
+input int      InpPauseSeconds   = 60;     // Durée de la pause si critique (sec)
+
 input group "Interface Graphique"
 input int      InpXOffset        = 20;     // Position X
 input int      InpYOffset        = 20;     // Position Y
-input int      InpFontSize       = 10;     // Taille police
-input color    InpHeaderColor    = clrYellow; 
-input color    InpBgColor        = C'30,30,30'; // Couleur du fond
-input int      InpBgWidth        = 450;    // Largeur du panneau
+input int      InpFontSize       = 9;      // Taille police (Optimisé)
+input color    InpHeaderColor    = clrGold; 
+input color    InpBgColor        = C'25,25,25'; // Couleur du fond plus sombre
+input int      InpBgWidth        = 460;    // Largeur du panneau
 
-//--- Structures pour la gestion mémoire sécurisée
+//--- Structures
 struct SymbolData
 {
    string name;
-   int    ichimokuHandle; // On stocke le handle pour ne pas le recréer
+   int    ichimokuHandle; 
+};
+
+struct ScanResult 
+{ 
+   string sym; 
+   double prc; 
+   double diff; 
 };
 
 //--- Variables globales
 string      g_symbols[];
-SymbolData  g_symbolData[]; // Tableau des structures (symbole + handle)
+SymbolData  g_symbolData[]; 
 int         g_totalSymbols = 0;
 string      g_prefix = "ScanIchi_";
+
+// Variables d'état
+datetime    g_pauseEndTime = 0;
+bool        g_isPaused = false;
+int         g_lastRowCount = 0; // Pour optimiser le nettoyage graphique
 
 //+------------------------------------------------------------------+
 //| Initialisation                                                   |
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   // 1. Initialisation des noms de symboles
    InitSymbols();
    
-   // 2. Initialisation des handles d'indicateurs (Gestion mémoire optimisée)
    if(!InitHandles())
    {
-      Print("Erreur critique lors de l'initialisation des handles.");
+      Print("Erreur critique : Impossible d'initialiser les indicateurs.");
       return(INIT_FAILED);
    }
    
+   // Première vérification RAM
+   CheckMemory();
+   
+   // Initialisation UI de base
+   CreateBackground(InpXOffset - 5, InpYOffset - 5, InpBgWidth, 100); // Taille initiale
+   
    EventSetTimer(InpScanSeconds);
    ScanMarket(); 
+   
    return(INIT_SUCCEEDED);
 }
 
 //+------------------------------------------------------------------+
-//| Deinitialisation - Libération propre de la mémoire               |
+//| Deinitialisation                                                 |
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
 {
    EventKillTimer();
-   
-   // Suppression des objets graphiques
+   // Suppression propre de tous les objets graphiques du script
    ObjectsDeleteAll(0, g_prefix);
-   
-   // Libération CRUCIALE des handles d'indicateurs
    ReleaseHandles();
-   
-   // Libération des tableaux
    ArrayFree(g_symbols);
    ArrayFree(g_symbolData);
-   
    ChartRedraw();
 }
 
 //+------------------------------------------------------------------+
-//| Timer                                                            |
+//| Timer Loop                                                       |
 //+------------------------------------------------------------------+
 void OnTimer()
 {
+   if(g_isPaused)
+   {
+      if(TimeCurrent() >= g_pauseEndTime)
+      {
+         g_isPaused = false;
+         Print("RAM stabilisée. Reprise du scan.");
+         // Force un scan immédiat
+         ScanMarket();
+      }
+      else
+      {
+         UpdateMemoryStatusUI(); 
+      }
+      return;
+   }
+   
    ScanMarket();
 }
 
 //+------------------------------------------------------------------+
-//| Initialise la liste des symboles                                 |
+//| Logique Mémoire                                                  |
+//+------------------------------------------------------------------+
+void CheckMemory()
+{
+   // CORRECTION MAJEURE : TERMINAL_MEMORY_USED retourne déjà des Mégaoctets (MB)
+   long memUsedMB = TerminalInfoInteger(TERMINAL_MEMORY_USED); 
+   
+   if(memUsedMB >= InpMemPauseMB)
+   {
+      if(!g_isPaused)
+      {
+         g_isPaused = true;
+         g_pauseEndTime = TimeCurrent() + InpPauseSeconds;
+         Print("ALERTE RAM: ", memUsedMB, " Mo utilisés. Pause de ", InpPauseSeconds, "s.");
+         UpdateMemoryStatusUI(); // Mise à jour immédiate de l'affichage
+      }
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Initialisation des symboles                                      |
 //+------------------------------------------------------------------+
 void InitSymbols()
 {
-   ArrayFree(g_symbols); // Nettoyage avant remplissage
-   
+   ArrayFree(g_symbols); 
    if(InpManualSymbols != "")
-     {
+   {
       ushort sep = StringGetCharacter(",", 0);
       StringSplit(InpManualSymbols, sep, g_symbols);
-     }
+   }
    else
-     {
-      int total = SymbolsTotal(true);
+   {
+      // Récupère uniquement les symboles du Market Watch pour économiser la mémoire
+      int total = SymbolsTotal(true); 
       ArrayResize(g_symbols, total);
       for(int i=0; i<total; i++) g_symbols[i] = SymbolName(i, true);
-     }
+   }
    g_totalSymbols = ArraySize(g_symbols);
 }
 
 //+------------------------------------------------------------------+
-//| Initialise les handles d'indicateurs (Optimisation Mémoire)      |
+//| Gestion des Handles (Indicateurs)                                |
 //+------------------------------------------------------------------+
 bool InitHandles()
 {
@@ -120,25 +172,18 @@ bool InitHandles()
    for(int i = 0; i < g_totalSymbols; i++)
    {
       g_symbolData[i].name = g_symbols[i];
-      // Création du handle UNE SEULE FOIS
+      // On crée le handle une seule fois ici
       g_symbolData[i].ichimokuHandle = iIchimoku(g_symbolData[i].name, _Period, InpTenkan, InpKijun, InpSenkou);
       
       if(g_symbolData[i].ichimokuHandle == INVALID_HANDLE)
-      {
-         // CORRECTION ICI : Suppression des crochets parasites
-         Print("Erreur création handle pour ", g_symbolData[i].name);
-      }
+         Print("Warning: Handle invalide pour ", g_symbolData[i].name);
    }
    return(true);
 }
 
-//+------------------------------------------------------------------+
-//| Libère les handles pour éviter les fuites de mémoire             |
-//+------------------------------------------------------------------+
 void ReleaseHandles()
 {
-   int total = ArraySize(g_symbolData);
-   for(int i = 0; i < total; i++)
+   for(int i = 0; i < ArraySize(g_symbolData); i++)
    {
       if(g_symbolData[i].ichimokuHandle != INVALID_HANDLE)
       {
@@ -149,154 +194,188 @@ void ReleaseHandles()
 }
 
 //+------------------------------------------------------------------+
-//| Fonction principale de scan                                      |
+//| Cœur du Scanner                                                  |
 //+------------------------------------------------------------------+
 void ScanMarket()
 {
-   // On supprime tout pour reconstruire proprement
-   ObjectsDeleteAll(0, g_prefix);
-   
-   int detectedCount = 0;
-   
-   // Utilisation d'une structure locale pour les résultats
-   struct Result { string sym; double prc; double diff; };
-   Result results[];
-   
-   // On alloue la mémoire nécessaire une seule fois
-   ArrayResize(results, g_totalSymbols);
+   CheckMemory();
+   if(g_isPaused) return;
 
+   // Récupération RAM (Correction: Pas de division par 1024*1024 car déjà en Mo)
+   long terminalRam = TerminalInfoInteger(TERMINAL_MEMORY_USED);
+   long mqlRam = MQLInfoInteger(MQL_MEMORY_USED) / (1024 * 1024); // Celui-ci est en Bytes, donc on convertit
+
+   ScanResult results[];
+   // Pré-allocation optimiste pour éviter les redimensionnements excessifs
+   ArrayResize(results, g_totalSymbols); 
+   int count = 0;
+
+   // --- BOUCLE DE SCAN ---
    for(int i = 0; i < g_totalSymbols; i++)
    {
-      // Sécurité : vérifier si le handle est valide avant de l'utiliser
       if(g_symbolData[i].ichimokuHandle == INVALID_HANDLE) continue;
       
       string symbol = g_symbolData[i].name;
+      
+      // Optimisation: Si symbole non dispo ou pas de tick, on passe vite
+      if(!SymbolInfoInteger(symbol, SYMBOL_SELECT)) continue; 
+      
       double price = SymbolInfoDouble(symbol, SYMBOL_BID);
-      
-      if(price <= 0) continue;
+      if(price <= 0) continue; // Données pas prêtes
 
-      // On passe le handle déjà créé au lieu de le recréer
-      double kijunValue = GetKijunValue(g_symbolData[i].ichimokuHandle);
+      double kijun = GetKijunValue(g_symbolData[i].ichimokuHandle);
+      if(kijun <= 0) continue;
       
-      if(kijunValue <= 0) continue;
+      double deviation = ((price - kijun) / price) * 100.0;
       
-      double deviationPercent = ((price - kijunValue) / price) * 100.0;
-      
-      if(MathAbs(deviationPercent) <= InpThresholdPercent)
-        {
-         results[detectedCount].sym = symbol;
-         results[detectedCount].prc = price;
-         results[detectedCount].diff = deviationPercent;
-         detectedCount++;
-        }
-     }
-
-   // --- DESSIN DU FOND ---
-   int lineH = InpFontSize + 8;
-   int bgHeight = 40 + (MathMax(1, detectedCount) * lineH);
-   CreateBackground(InpXOffset - 5, InpYOffset - 5, InpBgWidth, bgHeight);
-
-   // --- DESSIN DES TEXTES ---
-   UpdateDashboardHeader();
+      if(MathAbs(deviation) <= InpThresholdPercent)
+      {
+         results[count].sym = symbol;
+         results[count].prc = price;
+         results[count].diff = deviation;
+         count++;
+      }
+   }
    
-   if(detectedCount == 0)
-     {
-      CreateLabel(g_prefix+"none", "Aucune détection (Seuil " + DoubleToString(InpThresholdPercent, 2) + "%)", InpXOffset, InpYOffset + 30, clrGray);
-     }
-   else
-     {
-      for(int j = 0; j < detectedCount; j++)
-        {
-         UpdateDashboardRow(j, results[j].sym, results[j].prc, results[j].diff);
-        }
-     }
-     
-   ChartRedraw();
+   // Redimensionner à la taille réelle des résultats pour économiser RAM
+   ArrayResize(results, count);
+
+   // --- MISE A JOUR UI (Optimisée) ---
+   UpdateDashboard(results, count, terminalRam, mqlRam);
    
-   // Optionnel : Libérer le tableau temporaire (bien que local, c'est une bonne pratique)
-   ArrayFree(results); 
+   ArrayFree(results); // Libération immédiate du tableau temporaire
 }
 
 //+------------------------------------------------------------------+
-//| Interface Graphique - Fond                                       |
+//| Gestion UI Optimisée (Mise à jour vs Suppression)                |
 //+------------------------------------------------------------------+
+void UpdateDashboard(ScanResult &data[], int count, long totalRam, long scriptRam)
+{
+   // 1. Header
+   UpdateLabel(g_prefix+"h1", StringFormat("KIJUN SCANNER (Seuil: %.2f%%)", InpThresholdPercent), 
+               InpXOffset, InpYOffset, InpHeaderColor, true);
+               
+   // 2. Info RAM Correcte
+   color ramColor = (totalRam > InpMemWarningMB) ? clrOrange : clrLime;
+   if(totalRam > InpMemPauseMB) ramColor = clrRed;
+   
+   string ramTxt = StringFormat("Term RAM: %d MB | Script: %d MB", totalRam, scriptRam);
+   UpdateLabel(g_prefix+"ram", ramTxt, InpXOffset, InpYOffset + 15, ramColor);
+   
+   UpdateLabel(g_prefix+"sep", "--------------------------------------", InpXOffset, InpYOffset + 28, clrGray);
+
+   int startY = InpYOffset + 45;
+   int lineHeight = InpFontSize + 6;
+   
+   // 3. Affichage des lignes
+   if(count == 0)
+   {
+      UpdateLabel(g_prefix+"row_0", "Aucune opportunité détectée...", InpXOffset, startY, clrGray);
+      count = 1; // Pour garder au moins une ligne affichée
+   }
+   else
+   {
+      for(int i = 0; i < count; i++)
+      {
+         string trend = (data[i].diff > 0) ? "UP" : "DN";
+         color txtColor = (data[i].diff > 0) ? clrLime : clrRed;
+         string line = StringFormat("%-8s | %-8.5f | %+.2f%% | %s", 
+                                    data[i].sym, data[i].prc, data[i].diff, trend);
+         
+         UpdateLabel(g_prefix+"row_"+(string)i, line, InpXOffset, startY + (i*lineHeight), txtColor);
+      }
+   }
+   
+   // 4. Nettoyage des lignes "fantômes" (si on avait 10 lignes avant et 2 maintenant)
+   if(g_lastRowCount > count)
+   {
+      for(int k = count; k < g_lastRowCount; k++)
+      {
+         ObjectDelete(0, g_prefix+"row_"+(string)k);
+      }
+   }
+   g_lastRowCount = count;
+   
+   // 5. Ajustement taille fond
+   int bgH = 60 + (count * lineHeight);
+   string bgName = g_prefix + "bg";
+   if(ObjectFind(0, bgName) >= 0)
+   {
+      ObjectSetInteger(0, bgName, OBJPROP_YSIZE, bgH);
+   }
+   
+   ChartRedraw();
+}
+
+void UpdateMemoryStatusUI()
+{
+   long ram = TerminalInfoInteger(TERMINAL_MEMORY_USED);
+   int secLeft = (int)(g_pauseEndTime - TimeCurrent());
+   if(secLeft < 0) secLeft = 0;
+   
+   string txt = StringFormat("!!! PAUSE RAM !!! (%d MB) - Reprise: %ds", ram, secLeft);
+   UpdateLabel(g_prefix+"h1", txt, InpXOffset, InpYOffset, clrRed, true);
+   
+   // On cache les lignes pendant la pause critique
+   for(int k=0; k<g_lastRowCount; k++) ObjectDelete(0, g_prefix+"row_"+(string)k);
+   g_lastRowCount = 0;
+   
+   ChartRedraw();
+}
+
+//--- Helper pour créer ou mettre à jour un label sans le supprimer ---
+void UpdateLabel(string name, string text, int x, int y, color clr, bool isHeader=false)
+{
+   if(ObjectFind(0, name) < 0)
+   {
+      ObjectCreate(0, name, OBJ_LABEL, 0, 0, 0);
+      ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+      ObjectSetInteger(0, name, OBJPROP_FONTSIZE, InpFontSize);
+      ObjectSetString(0, name, OBJPROP_FONT, "Consolas"); // Police Monospace pour alignement
+      ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+      ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
+   }
+   
+   // On ne change les propriétés que si nécessaire (optimisation)
+   if(ObjectGetString(0, name, OBJPROP_TEXT) != text)
+      ObjectSetString(0, name, OBJPROP_TEXT, text);
+      
+   if(ObjectGetInteger(0, name, OBJPROP_COLOR) != clr)
+      ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
+      
+   ObjectSetInteger(0, name, OBJPROP_XDISTANCE, x);
+   ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y);
+}
+
 void CreateBackground(int x, int y, int w, int h)
 {
    string name = g_prefix + "bg";
-   if(ObjectCreate(0, name, OBJ_RECTANGLE_LABEL, 0, 0, 0))
-     {
-      ObjectSetInteger(0, name, OBJPROP_XDISTANCE, x);
-      ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y);
-      ObjectSetInteger(0, name, OBJPROP_XSIZE, w);
-      ObjectSetInteger(0, name, OBJPROP_YSIZE, h);
+   if(ObjectFind(0, name) < 0)
+   {
+      ObjectCreate(0, name, OBJ_RECTANGLE_LABEL, 0, 0, 0);
+      ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
       ObjectSetInteger(0, name, OBJPROP_BGCOLOR, InpBgColor);
       ObjectSetInteger(0, name, OBJPROP_BORDER_TYPE, BORDER_FLAT);
-      ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
       ObjectSetInteger(0, name, OBJPROP_BACK, false);
       ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
       ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
-     }
+   }
+   ObjectSetInteger(0, name, OBJPROP_XDISTANCE, x);
+   ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y);
+   ObjectSetInteger(0, name, OBJPROP_XSIZE, w);
+   ObjectSetInteger(0, name, OBJPROP_YSIZE, h);
 }
 
-void UpdateDashboardHeader()
-{
-   string text = StringFormat("SCANNER KIJUN (Seuil: %.2f%%)", InpThresholdPercent);
-   CreateLabel(g_prefix+"h1", text, InpXOffset, InpYOffset, InpHeaderColor);
-   CreateLabel(g_prefix+"h2", "--------------------------------------------------", InpXOffset, InpYOffset+15, InpHeaderColor);
-}
-
-void UpdateDashboardRow(int rowIdx, string symbol, double price, double diff)
-{
-   int y = InpYOffset + 35 + (rowIdx * (InpFontSize + 8));
-   string trend = (diff > 0) ? "HAUT" : "BAS ";
-   color  txtColor = (diff > 0) ? clrLime : clrRed;
-   
-   string text = StringFormat("%-10s | %-9.5f | %+.3f%% | %s", 
-                              symbol, price, diff, trend);
-   
-   CreateLabel(g_prefix + "row_" + (string)rowIdx, text, InpXOffset, y, txtColor);
-}
-
-void CreateLabel(string name, string text, int x, int y, color clr)
-{
-   // Vérification si l'objet existe déjà pour éviter les erreurs logs (bien que DeleteAll soit appelé)
-   if(ObjectFind(0, name) < 0)
-     {
-      if(ObjectCreate(0, name, OBJ_LABEL, 0, 0, 0))
-        {
-         ObjectSetString(0, name, OBJPROP_TEXT, text);
-         ObjectSetInteger(0, name, OBJPROP_XDISTANCE, x);
-         ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y);
-         ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
-         ObjectSetInteger(0, name, OBJPROP_FONTSIZE, InpFontSize);
-         ObjectSetString(0, name, OBJPROP_FONT, "Courier New");
-         ObjectSetInteger(0, name, OBJPROP_ZORDER, 1); 
-         ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
-        }
-     }
-   else
-     {
-      // Si l'objet existe (cas rare ici), on met juste à jour le texte
-      ObjectSetString(0, name, OBJPROP_TEXT, text);
-     }
-}
-
-//+------------------------------------------------------------------+
-//| Récupère la Kijun (Version sécurisée avec Handle externe)        |
-//+------------------------------------------------------------------+
 double GetKijunValue(int handle)
 {
-   // Sécurité : Si le handle n'est pas valide, on retourne 0
    if(handle == INVALID_HANDLE) return 0.0;
-
+   
    double buffer[];
-   ArraySetAsSeries(buffer, true);
+   // Optimisation mémoire : on ne demande que la dernière valeur
+   if(CopyBuffer(handle, 1, 0, 1, buffer) != 1) return 0.0;
    
-   // Copie des données depuis le handle pré-existant
-   // On vérifie si la copie a réussi
-   if(CopyBuffer(handle, 1, 0, 1, buffer) <= 0) return 0.0;
-   
-   // Plus besoin de IndicatorRelease ici, car géré globalement
-   return buffer[0];
+   double val = buffer[0];
+   ArrayFree(buffer); // Libération immédiate
+   return val;
 }
 //+------------------------------------------------------------------+
