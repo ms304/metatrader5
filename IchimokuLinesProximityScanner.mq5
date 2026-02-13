@@ -1,15 +1,16 @@
 //+------------------------------------------------------------------+
-//|                            KijunScanner_Optimized_v3.1.mq5       |
+//|                            KijunScanner_Optimized_v3.2.mq5       |
 //|                                  Copyright 2026, Didier Le HPI Réunionnais    |
 //|                                       https://www.mql5.com       |
 //+------------------------------------------------------------------+
 #property copyright "Didier Le HPI Réunionnais"
 #property link      "https://www.Didier-Le-HPI-Réunionnais.re"
-#property version   "3.10"
+#property version   "3.20"
 #property strict
 
 //--- INPUTS
 input group "Paramètres Ichimoku"
+input ENUM_TIMEFRAMES InpScanTimeframe = PERIOD_D1; // Timeframe à scanner (Force le Daily par défaut)
 input int      InpTenkan         = 9;      // Tenkan-sen
 input int      InpKijun          = 26;     // Kijun-sen
 input int      InpSenkou         = 52;     // Senkou Span B
@@ -29,8 +30,8 @@ input int      InpXOffset        = 20;     // Position X
 input int      InpYOffset        = 20;     // Position Y
 input int      InpFontSize       = 9;      // Taille police (Optimisé)
 input color    InpHeaderColor    = clrGold; 
-input color    InpBgColor        = C'25,25,25'; // Couleur du fond plus sombre
-input int      InpBgWidth        = 500;    // Largeur du panneau (Augmentée pour afficher le nom de la ligne)
+input color    InpBgColor        = C'25,25,25'; 
+input int      InpBgWidth        = 550;    // Largeur ajustée
 
 //--- Structures
 struct SymbolData
@@ -39,7 +40,6 @@ struct SymbolData
    int    ichimokuHandle; 
 };
 
-// Modification : Ajout du champ 'line' pour identifier Tenkan/Kijun/SSB
 struct ScanResult 
 { 
    string sym; 
@@ -66,6 +66,7 @@ int OnInit()
 {
    InitSymbols();
    
+   // On utilise InpScanTimeframe au lieu de _Period pour garantir le TF choisi
    if(!InitHandles())
    {
       Print("Erreur critique : Impossible d'initialiser les indicateurs.");
@@ -76,8 +77,7 @@ int OnInit()
    CreateBackground(InpXOffset - 5, InpYOffset - 5, InpBgWidth, 100); 
    
    EventSetTimer(InpScanSeconds);
-   ScanMarket(); 
-   
+   // Premier scan différé légèrement pour laisser le temps aux handles de charger
    return(INIT_SUCCEEDED);
 }
 
@@ -123,14 +123,13 @@ void OnTimer()
 void CheckMemory()
 {
    long memUsedMB = TerminalInfoInteger(TERMINAL_MEMORY_USED); 
-   
    if(memUsedMB >= InpMemPauseMB)
    {
       if(!g_isPaused)
       {
          g_isPaused = true;
          g_pauseEndTime = TimeCurrent() + InpPauseSeconds;
-         Print("ALERTE RAM: ", memUsedMB, " Mo utilisés. Pause de ", InpPauseSeconds, "s.");
+         Print("ALERTE RAM: ", memUsedMB, " Mo utilisés. Pause.");
          UpdateMemoryStatusUI(); 
       }
    }
@@ -167,7 +166,8 @@ bool InitHandles()
    for(int i = 0; i < g_totalSymbols; i++)
    {
       g_symbolData[i].name = g_symbols[i];
-      g_symbolData[i].ichimokuHandle = iIchimoku(g_symbolData[i].name, _Period, InpTenkan, InpKijun, InpSenkou);
+      // FIX: Utilisation de InpScanTimeframe au lieu de _Period
+      g_symbolData[i].ichimokuHandle = iIchimoku(g_symbolData[i].name, InpScanTimeframe, InpTenkan, InpKijun, InpSenkou);
       
       if(g_symbolData[i].ichimokuHandle == INVALID_HANDLE)
          Print("Warning: Handle invalide pour ", g_symbolData[i].name);
@@ -188,7 +188,23 @@ void ReleaseHandles()
 }
 
 //+------------------------------------------------------------------+
-//| Cœur du Scanner (Modifié pour Tenkan, Kijun, SSB)                |
+//| Helper: Vérification Disponibilité Données (CRUCIAL POUR DAILY)  |
+//+------------------------------------------------------------------+
+bool IsDataReady(string symbol, ENUM_TIMEFRAMES tf)
+{
+   // Vérifie si le terminal a assez de barres calculées
+   if(Bars(symbol, tf) < 100) 
+   {
+      // Force le téléchargement/calcul
+      datetime times[]; 
+      CopyTime(symbol, tf, 0, 1, times); 
+      return false;
+   }
+   return true;
+}
+
+//+------------------------------------------------------------------+
+//| Cœur du Scanner                                                  |
 //+------------------------------------------------------------------+
 void ScanMarket()
 {
@@ -199,24 +215,28 @@ void ScanMarket()
    long mqlRam = MQLInfoInteger(MQL_MEMORY_USED) / (1024 * 1024);
 
    ScanResult results[];
-   // On prévoit large : chaque symbole peut potentiellement toucher les 3 lignes
    ArrayResize(results, g_totalSymbols * 3); 
    int count = 0;
+   
+   // Pour le scan Daily, le prix peut être éloigné, on vérifie que le prix est valide
+   string tfString = EnumToString(InpScanTimeframe);
+   string tfDisplay = StringSubstr(tfString, 7); // Enleve "PERIOD_"
 
-   // --- BOUCLE DE SCAN ---
    for(int i = 0; i < g_totalSymbols; i++)
    {
       if(g_symbolData[i].ichimokuHandle == INVALID_HANDLE) continue;
       
       string symbol = g_symbolData[i].name;
       
+      // 1. Vérification selection et DONNÉES
       if(!SymbolInfoInteger(symbol, SYMBOL_SELECT)) continue; 
-      
+      if(!IsDataReady(symbol, InpScanTimeframe)) continue; // Saute si data pas prête (évite les erreurs 0.0)
+
       double price = SymbolInfoDouble(symbol, SYMBOL_BID);
       if(price <= 0) continue; 
 
       // --- 1. TEST TENKAN (Buffer 0) ---
-      double tenkan = GetIchiValue(g_symbolData[i].ichimokuHandle, 0);
+      double tenkan = GetIchiValue(g_symbolData[i].ichimokuHandle, 0, symbol);
       if(tenkan > 0)
       {
          double devT = ((price - tenkan) / price) * 100.0;
@@ -231,7 +251,7 @@ void ScanMarket()
       }
 
       // --- 2. TEST KIJUN (Buffer 1) ---
-      double kijun = GetIchiValue(g_symbolData[i].ichimokuHandle, 1);
+      double kijun = GetIchiValue(g_symbolData[i].ichimokuHandle, 1, symbol);
       if(kijun > 0)
       {
          double devK = ((price - kijun) / price) * 100.0;
@@ -246,7 +266,7 @@ void ScanMarket()
       }
 
       // --- 3. TEST SSB (Buffer 3) ---
-      double ssb = GetIchiValue(g_symbolData[i].ichimokuHandle, 3);
+      double ssb = GetIchiValue(g_symbolData[i].ichimokuHandle, 3, symbol);
       if(ssb > 0)
       {
          double devS = ((price - ssb) / price) * 100.0;
@@ -262,90 +282,61 @@ void ScanMarket()
    }
    
    ArrayResize(results, count);
-
-   // --- MISE A JOUR UI ---
-   UpdateDashboard(results, count, terminalRam, mqlRam);
-   
+   UpdateDashboard(results, count, terminalRam, mqlRam, tfDisplay);
    ArrayFree(results); 
 }
 
 //+------------------------------------------------------------------+
-//| Gestion UI Optimisée                                             |
+//| Gestion UI                                                       |
 //+------------------------------------------------------------------+
-void UpdateDashboard(ScanResult &data[], int count, long totalRam, long scriptRam)
+void UpdateDashboard(ScanResult &data[], int count, long totalRam, long scriptRam, string tf)
 {
-   // 1. Header
-   UpdateLabel(g_prefix+"h1", StringFormat("ICHIMOKU SCANNER (Seuil: %.2f%%)", InpThresholdPercent), 
+   // Header avec Timeframe affiché
+   UpdateLabel(g_prefix+"h1", StringFormat("ICHIMOKU [%s] (Seuil: %.2f%%)", tf, InpThresholdPercent), 
                InpXOffset, InpYOffset, InpHeaderColor, true);
                
-   // 2. Info RAM
-   color ramColor = (totalRam > InpMemWarningMB) ? clrOrange : clrLime;
-   if(totalRam > InpMemPauseMB) ramColor = clrRed;
-   
    string ramTxt = StringFormat("Term RAM: %d MB | Script: %d MB", totalRam, scriptRam);
-   UpdateLabel(g_prefix+"ram", ramTxt, InpXOffset, InpYOffset + 15, ramColor);
+   UpdateLabel(g_prefix+"ram", ramTxt, InpXOffset, InpYOffset + 15, (totalRam>InpMemWarningMB)?clrOrange:clrLime);
    
-   // En-tête des colonnes
    UpdateLabel(g_prefix+"cols", "Symbole  | Prix     | Ligne  | Dist %", InpXOffset, InpYOffset + 30, clrWhite);
    UpdateLabel(g_prefix+"sep", "------------------------------------------", InpXOffset, InpYOffset + 40, clrGray);
 
    int startY = InpYOffset + 55;
    int lineHeight = InpFontSize + 6;
    
-   // 3. Affichage des lignes
    if(count == 0)
    {
-      UpdateLabel(g_prefix+"row_0", "Aucune opportunité détectée...", InpXOffset, startY, clrGray);
+      UpdateLabel(g_prefix+"row_0", "Recherche ("+tf+")... Patience...", InpXOffset, startY, clrGray);
       count = 1; 
    }
    else
    {
       for(int i = 0; i < count; i++)
       {
-         color txtColor = (data[i].diff >= 0) ? clrLime : clrRed; // Vert si prix > ligne, Rouge si prix < ligne
-         
-         // Formatage avec alignement : Symbole | Prix | Ligne | %Diff
+         color txtColor = (data[i].diff >= 0) ? clrLime : clrRed;
          string lineStr = StringFormat("%-8s | %-8.5f | %-6s | %+.2f%%", 
                                     data[i].sym, data[i].prc, data[i].line, data[i].diff);
-         
          UpdateLabel(g_prefix+"row_"+(string)i, lineStr, InpXOffset, startY + (i*lineHeight), txtColor);
       }
    }
    
-   // 4. Nettoyage
    if(g_lastRowCount > count)
    {
-      for(int k = count; k < g_lastRowCount; k++)
-      {
-         ObjectDelete(0, g_prefix+"row_"+(string)k);
-      }
+      for(int k = count; k < g_lastRowCount; k++) ObjectDelete(0, g_prefix+"row_"+(string)k);
    }
    g_lastRowCount = count;
    
-   // 5. Ajustement taille fond
    int bgH = 70 + (count * lineHeight);
    string bgName = g_prefix + "bg";
-   if(ObjectFind(0, bgName) >= 0)
-   {
-      ObjectSetInteger(0, bgName, OBJPROP_YSIZE, bgH);
-   }
-   
+   if(ObjectFind(0, bgName) >= 0) ObjectSetInteger(0, bgName, OBJPROP_YSIZE, bgH);
    ChartRedraw();
 }
 
 void UpdateMemoryStatusUI()
 {
    long ram = TerminalInfoInteger(TERMINAL_MEMORY_USED);
-   int secLeft = (int)(g_pauseEndTime - TimeCurrent());
-   if(secLeft < 0) secLeft = 0;
-   
-   string txt = StringFormat("!!! PAUSE RAM !!! (%d MB) - Reprise: %ds", ram, secLeft);
+   string txt = StringFormat("!!! PAUSE RAM !!! (%d MB)", ram);
    UpdateLabel(g_prefix+"h1", txt, InpXOffset, InpYOffset, clrRed, true);
-   
-   for(int k=0; k<g_lastRowCount; k++) ObjectDelete(0, g_prefix+"row_"+(string)k);
-   g_lastRowCount = 0;
-   
-   ChartRedraw();
 }
 
 void UpdateLabel(string name, string text, int x, int y, color clr, bool isHeader=false)
@@ -359,13 +350,8 @@ void UpdateLabel(string name, string text, int x, int y, color clr, bool isHeade
       ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
       ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
    }
-   
-   if(ObjectGetString(0, name, OBJPROP_TEXT) != text)
-      ObjectSetString(0, name, OBJPROP_TEXT, text);
-      
-   if(ObjectGetInteger(0, name, OBJPROP_COLOR) != clr)
-      ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
-      
+   if(ObjectGetString(0, name, OBJPROP_TEXT) != text) ObjectSetString(0, name, OBJPROP_TEXT, text);
+   if(ObjectGetInteger(0, name, OBJPROP_COLOR) != clr) ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
    ObjectSetInteger(0, name, OBJPROP_XDISTANCE, x);
    ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y);
 }
@@ -389,17 +375,34 @@ void CreateBackground(int x, int y, int w, int h)
    ObjectSetInteger(0, name, OBJPROP_YSIZE, h);
 }
 
-// Nouvelle fonction générique pour récupérer n'importe quel buffer Ichimoku
-// Buffer 0 = Tenkan, 1 = Kijun, 3 = SSB
-double GetIchiValue(int handle, int bufferIdx)
+//+------------------------------------------------------------------+
+//| Récupération Valeur Ichi avec Gestion Erreur                     |
+//+------------------------------------------------------------------+
+double GetIchiValue(int handle, int bufferIdx, string symbol)
 {
    if(handle == INVALID_HANDLE) return 0.0;
    
    double buffer[];
-   if(CopyBuffer(handle, bufferIdx, 0, 1, buffer) != 1) return 0.0;
+   // Reset de l'erreur
+   ResetLastError();
    
-   double val = buffer[0];
-   ArrayFree(buffer); 
-   return val;
+   // Tentative de copie
+   if(CopyBuffer(handle, bufferIdx, 0, 1, buffer) < 0)
+   {
+      // Erreur fréquente 4806 = Requested data not found
+      int err = GetLastError();
+      if(err == 4806 || err == 4807) 
+      {
+         // On ne spamme pas le journal, mais on sait que c'est un pb de data
+         // Le scanner réessaiera au prochain tick
+      }
+      else
+      {
+         Print("Erreur CopyBuffer ", symbol, " Buffer: ", bufferIdx, " Erreur: ", err);
+      }
+      return 0.0;
+   }
+   
+   return buffer[0];
 }
 //+------------------------------------------------------------------+
