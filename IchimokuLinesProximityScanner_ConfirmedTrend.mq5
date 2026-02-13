@@ -1,346 +1,259 @@
 //+------------------------------------------------------------------+
-//|                            KijunScanner_Optimized_v4.2.mq5       |
+//|                            KijunScanner_Massive_v4.6.mq5         |
 //|                                  Copyright 2026, Didier Le HPI   |
 //+------------------------------------------------------------------+
 #property copyright "Didier Le HPI Réunionnais"
 #property link      "https://www.Didier-Le-HPI-Réunionnais.re"
-#property version   "4.20"
+#property version   "4.60"
 #property strict
 
 //--- INPUTS
 input group "Paramètres Ichimoku"
-input ENUM_TIMEFRAMES InpScanTimeframe = PERIOD_CURRENT; // UT à scanner (PERIOD_CURRENT = UT du graphique)
-input int      InpTenkan         = 9;      // Tenkan-sen
-input int      InpKijun          = 26;     // Kijun-sen
-input int      InpSenkou         = 52;     // Senkou Span B
+input ENUM_TIMEFRAMES InpScanTimeframe = PERIOD_CURRENT; 
+input int      InpTenkan         = 9;      
+input int      InpKijun          = 26;     
+input int      InpSenkou         = 52;     
 
-input group "Paramètres du Scanner"
-input string   InpManualSymbols  = "";     // Symboles (ex: EURUSD,GBPUSD) - Vide = Market Watch
-input double   InpThresholdPercent = 0.10; // Seuil d'alerte en %
-input int      InpScanSeconds    = 30;     // Fréquence du scan en secondes
+input group "Paramètres du Scanner (SCAN TOTAL)"
+input int      InpBatchSize      = 10;     // Symboles par lot (Garde le PC fluide)
+input int      InpBatchDelay     = 1;      // Pause entre lots (secondes)
+input string   InpManualSymbols  = "";     // Vide = SCAN TOUT LE MARKET WATCH
+input double   InpThresholdPercent = 0.10; 
 
 input group "Notifications Mobile"
-input bool     InpSendPush       = true;   // Envoyer notifications sur mobile
-input int      InpAlertCooldown  = 60;     // Pause entre alertes sur même paire (minutes)
+input bool     InpSendPush       = true;   
+input int      InpAlertCooldown  = 60;     
 
 input group "Gestion de la Mémoire (RAM)"
-input int      InpMemWarningMB   = 500;    // Alerte RAM (Mo) - Orange
-input int      InpMemPauseMB     = 800;    // Pause Scan (Mo) - Rouge
-input int      InpPauseSeconds   = 60;     // Durée de la pause si critique (sec)
+input int      InpMemCriticalMB  = 1500;   // Arrêt si dépasse 1.5 Go de RAM
 
 input group "Interface Graphique"
-input int      InpXOffset        = 20;     // Position X
-input int      InpYOffset        = 20;     // Position Y
-input int      InpFontSize       = 9;      // Taille police
+input int      InpXOffset        = 20;     
+input int      InpYOffset        = 20;     
+input int      InpFontSize       = 9;      
 input color    InpHeaderColor    = clrGold; 
 input color    InpBgColor        = C'25,25,25'; 
-input int      InpBgWidth        = 550;
+input int      InpMaxRowsDisplay = 40;     // Max lignes affichées à l'écran
 
 //--- Structures
-struct SymbolData
-{
+struct SymbolData {
    string name;
    int    ichimokuHandle; 
-   datetime lastAlertTenkan;
-   datetime lastAlertKijun;
-   datetime lastAlertSSB;
+   datetime lastAlertTenkan, lastAlertKijun, lastAlertSSB;
 };
 
-struct ScanResult 
-{ 
-   string sym; 
-   double prc; 
-   double diff; 
-   string line; 
+struct ScanResult { 
+   string sym; double prc; double diff; string line; 
 };
 
 //--- Variables globales
-string          g_symbols[];
 SymbolData      g_symbolData[]; 
 int             g_totalSymbols = 0;
 string          g_prefix = "ScanIchi_";
 ENUM_TIMEFRAMES g_currentTF;
 
-// Variables d'état
-datetime    g_pauseEndTime = 0;
-bool        g_isPaused = false;
-int         g_lastRowCount = 0; 
+int             g_currentIdx = 0;         
+ScanResult      g_accumulatedResults[];   
+ScanResult      g_finalResultsForDisplay[]; 
+int             g_accCount = 0;       
+int             g_displayCount = 0;
+int             g_lastRowCount = 0;
 
 //+------------------------------------------------------------------+
 //| Initialisation                                                   |
 //+------------------------------------------------------------------+
-int OnInit()
-{
+int OnInit() {
    g_currentTF = (InpScanTimeframe == PERIOD_CURRENT) ? _Period : InpScanTimeframe;
-   
    ObjectsDeleteAll(0, g_prefix);
-   ReleaseHandles();
-   InitSymbols();
    
-   if(!InitHandles())
-   {
-      Print("Erreur critique : Impossible d'initialiser les handles.");
+   // 1. Initialisation de la liste sans aucune limite
+   InitSymbolsList();
+   
+   if(g_totalSymbols <= 0) {
+      Print("ERREUR: Aucun symbole trouvé dans le Market Watch !");
       return(INIT_FAILED);
    }
-   
-   CreateBackground(InpXOffset - 5, InpYOffset - 5, InpBgWidth, 100); 
-   EventSetTimer(InpScanSeconds);
-   
+
+   // 2. Message de confirmation dans le Journal
+   PrintFormat("Démarrage du Scanner : %d symboles détectés.", g_totalSymbols);
+
+   CreateBackground(InpXOffset - 5, InpYOffset - 5, 550, 100); 
+   EventSetTimer(InpBatchDelay);
    return(INIT_SUCCEEDED);
 }
 
-//+------------------------------------------------------------------+
-//| Deinitialisation                                                 |
-//+------------------------------------------------------------------+
-void OnDeinit(const int reason)
-{
+void OnDeinit(const int reason) {
    EventKillTimer();
    ObjectsDeleteAll(0, g_prefix);
-   ReleaseHandles();
-   ArrayFree(g_symbols);
-   ArrayFree(g_symbolData);
-   ChartRedraw();
-}
-
-//+------------------------------------------------------------------+
-//| Timer Loop                                                       |
-//+------------------------------------------------------------------+
-void OnTimer()
-{
-   if(g_isPaused)
-   {
-      if(TimeCurrent() >= g_pauseEndTime) g_isPaused = false;
-      else { UpdateMemoryStatusUI(); return; }
+   for(int i = 0; i < ArraySize(g_symbolData); i++) {
+      if(g_symbolData[i].ichimokuHandle != INVALID_HANDLE) 
+         IndicatorRelease(g_symbolData[i].ichimokuHandle);
    }
-   ScanMarket();
+   ArrayFree(g_symbolData);
+   ArrayFree(g_accumulatedResults);
 }
 
 //+------------------------------------------------------------------+
-//| Cœur du Scanner                                                  |
+//| Timer - Scan par lots de 10                                      |
 //+------------------------------------------------------------------+
-void ScanMarket()
-{
-   CheckMemory();
-   if(g_isPaused) return;
+void OnTimer() {
+   if(TerminalInfoInteger(TERMINAL_MEMORY_USED) > InpMemCriticalMB) return;
 
-   long terminalRam = TerminalInfoInteger(TERMINAL_MEMORY_USED);
-   long mqlRam = MQLInfoInteger(MQL_MEMORY_USED) / (1024 * 1024);
-
-   ScanResult results[];
-   ArrayResize(results, g_totalSymbols * 3); 
-   
-   int count = 0;
-   string tfDisplay = StringSubstr(EnumToString(g_currentTF), 7); 
+   int limit = MathMin(g_currentIdx + InpBatchSize, g_totalSymbols);
    datetime now = TimeCurrent();
    int cooldownSec = InpAlertCooldown * 60;
 
-   for(int i = 0; i < g_totalSymbols; i++)
-   {
-      if(g_symbolData[i].ichimokuHandle == INVALID_HANDLE) continue;
+   for(int i = g_currentIdx; i < limit; i++) {
+      if(IsStopped()) return;
+
+      // Création du handle si inexistant
+      if(g_symbolData[i].ichimokuHandle == INVALID_HANDLE) {
+         g_symbolData[i].ichimokuHandle = iIchimoku(g_symbolData[i].name, g_currentTF, InpTenkan, InpKijun, InpSenkou);
+      }
       
-      string symbol = g_symbolData[i].name;
-      if(!SymbolInfoInteger(symbol, SYMBOL_SELECT)) continue; 
+      if(g_symbolData[i].ichimokuHandle == INVALID_HANDLE) continue;
 
-      double price = SymbolInfoDouble(symbol, SYMBOL_BID);
-      if(price <= 0) continue; 
+      double price = SymbolInfoDouble(g_symbolData[i].name, SYMBOL_BID);
+      if(price <= 0) continue;
 
-      // Récupération de TOUTES les lignes pour le filtrage
-      double t = GetIchiValue(g_symbolData[i].ichimokuHandle, 0); // Tenkan
-      double k = GetIchiValue(g_symbolData[i].ichimokuHandle, 1); // Kijun
-      double a = GetIchiValue(g_symbolData[i].ichimokuHandle, 2); // SSA
-      double b = GetIchiValue(g_symbolData[i].ichimokuHandle, 3); // SSB
+      // Récupération Ichimoku
+      double t = GetIchiValue(g_symbolData[i].ichimokuHandle, 0); 
+      double k = GetIchiValue(g_symbolData[i].ichimokuHandle, 1); 
+      double a = GetIchiValue(g_symbolData[i].ichimokuHandle, 2); 
+      double b = GetIchiValue(g_symbolData[i].ichimokuHandle, 3); 
 
-      // --- TEST TENKAN ---
-      CheckLogic(i, t, t, k, a, b, "Tenkan", price, now, cooldownSec, results, count);
-      // --- TEST KIJUN ---
-      CheckLogic(i, k, t, k, a, b, "Kijun", price, now, cooldownSec, results, count);
-      // --- TEST SSB ---
-      CheckLogic(i, b, t, k, a, b, "SSB", price, now, cooldownSec, results, count);
+      CheckLogic(i, t, t, k, a, b, "Tenkan", price, now, cooldownSec);
+      CheckLogic(i, k, t, k, a, b, "Kijun", price, now, cooldownSec);
+      CheckLogic(i, b, t, k, a, b, "SSB", price, now, cooldownSec);
    }
+
+   g_currentIdx = limit;
    
-   ArrayResize(results, count);
-   UpdateDashboard(results, count, terminalRam, mqlRam, tfDisplay);
-   ArrayFree(results); 
+   // UI PROGRESSION
+   UpdateLabel(g_prefix+"progress", StringFormat("Scan : %d / %d", g_currentIdx, g_totalSymbols), InpXOffset + 380, InpYOffset, clrCyan);
+
+   // SI CYCLE FINI
+   if(g_currentIdx >= g_totalSymbols) {
+      g_displayCount = MathMin(g_accCount, InpMaxRowsDisplay);
+      ArrayResize(g_finalResultsForDisplay, g_displayCount);
+      for(int r=0; r<g_displayCount; r++) g_finalResultsForDisplay[r] = g_accumulatedResults[r];
+      
+      UpdateDashboard();
+      
+      // Reset pour nouveau cycle
+      g_currentIdx = 0;
+      g_accCount = 0;
+      ArrayFree(g_accumulatedResults);
+   }
 }
 
 //+------------------------------------------------------------------+
-//| Logique de vérification (Alignement de toutes les lignes)        |
+//| Logique Ichimoku                                                 |
 //+------------------------------------------------------------------+
 void CheckLogic(int symIdx, double lineVal, double t, double k, double a, double b, 
-                string lineName, double price, datetime now, int cooldown, ScanResult &res[], int &count)
-{
+                string lineName, double price, datetime now, int cooldown) {
    if(lineVal <= 0 || t <= 0 || k <= 0 || a <= 0 || b <= 0) return;
 
    double dev = ((price - lineVal) / price) * 100.0;
    
-   // 1. Vérifier si on est dans le seuil de proximité
-   if(MathAbs(dev) <= InpThresholdPercent)
-   {
-      bool isAligned = false;
-
-      // 2. Vérification de l'alignement (Toutes les lignes doivent être du même côté que la ligne scannée)
-      if(price > lineVal) // L'actif est AU-DESSUS (Support potentiel)
-      {
-         // Toutes les lignes doivent être sous le prix
-         if(price > t && price > k && price > a && price > b) isAligned = true;
-      }
-      else // L'actif est EN-DESSOUS (Résistance potentielle)
-      {
-         // Toutes les lignes doivent être au-dessus du prix
-         if(price < t && price < k && price < a && price < b) isAligned = true;
-      }
-
-      if(isAligned)
-      {
-         res[count].sym = g_symbolData[symIdx].name;
-         res[count].prc = price;
-         res[count].diff = dev;
-         res[count].line = lineName;
+   if(MathAbs(dev) <= InpThresholdPercent) {
+      bool isAligned = (price > lineVal) ? (price > t && price > k && price > a && price > b) 
+                                         : (price < t && price < k && price < a && price < b);
+      if(isAligned) {
+         g_accCount++;
+         ArrayResize(g_accumulatedResults, g_accCount);
+         int last = g_accCount - 1;
+         g_accumulatedResults[last].sym = g_symbolData[symIdx].name;
+         g_accumulatedResults[last].prc = price;
+         g_accumulatedResults[last].diff = dev;
+         g_accumulatedResults[last].line = lineName;
          
-         // Gestion Alertes
-         datetime lastA = 0;
-         if(lineName=="Tenkan") lastA = g_symbolData[symIdx].lastAlertTenkan;
-         else if(lineName=="Kijun") lastA = g_symbolData[symIdx].lastAlertKijun;
-         else lastA = g_symbolData[symIdx].lastAlertSSB;
-
-         if(now - lastA > cooldown)
-         {
-            SendAlert(g_symbolData[symIdx].name, lineName, price, dev, g_currentTF);
-            if(lineName=="Tenkan") g_symbolData[symIdx].lastAlertTenkan = now;
-            else if(lineName=="Kijun") g_symbolData[symIdx].lastAlertKijun = now;
-            else g_symbolData[symIdx].lastAlertSSB = now;
-         }
-         count++;
+         // Alertes
+         ManageAlerts(symIdx, lineName, price, dev, now, cooldown);
       }
    }
 }
 
 //+------------------------------------------------------------------+
-//| Fonctions Utilitaires et Mémoire                                 |
+//| Initialisation des symboles (SANS LIMITE)                        |
 //+------------------------------------------------------------------+
-void CheckMemory()
-{
-   long memUsedMB = TerminalInfoInteger(TERMINAL_MEMORY_USED); 
-   if(memUsedMB >= InpMemPauseMB)
-   {
-      if(!g_isPaused)
-      {
-         g_isPaused = true;
-         g_pauseEndTime = TimeCurrent() + InpPauseSeconds;
-         UpdateMemoryStatusUI(); 
-      }
-   }
-}
-
-void InitSymbols()
-{
-   ArrayFree(g_symbols); 
-   if(InpManualSymbols != "")
-   {
-      ushort sep = StringGetCharacter(",", 0);
-      StringSplit(InpManualSymbols, sep, g_symbols);
-   }
-   else
-   {
-      int total = SymbolsTotal(true); 
-      ArrayResize(g_symbols, total);
-      for(int i=0; i<total; i++) g_symbols[i] = SymbolName(i, true);
-   }
-   g_totalSymbols = ArraySize(g_symbols);
-}
-
-bool InitHandles()
-{
+void InitSymbolsList() {
    ArrayFree(g_symbolData);
-   if(ArrayResize(g_symbolData, g_totalSymbols) <= 0) return false;
    
-   for(int i = 0; i < g_totalSymbols; i++)
-   {
-      g_symbolData[i].name = g_symbols[i];
-      g_symbolData[i].ichimokuHandle = iIchimoku(g_symbolData[i].name, g_currentTF, InpTenkan, InpKijun, InpSenkou);
+   if(InpManualSymbols != "") {
+      string temp[];
+      ushort sep = StringGetCharacter(",", 0);
+      StringSplit(InpManualSymbols, sep, temp);
+      g_totalSymbols = ArraySize(temp);
+      ArrayResize(g_symbolData, g_totalSymbols);
+      for(int i=0; i<g_totalSymbols; i++) g_symbolData[i].name = temp[i];
+   } else {
+      // SCAN TOUT LE MARKET WATCH
+      g_totalSymbols = SymbolsTotal(true); 
+      ArrayResize(g_symbolData, g_totalSymbols);
+      for(int i=0; i<g_totalSymbols; i++) {
+         g_symbolData[i].name = SymbolName(i, true);
+      }
+   }
+
+   for(int i=0; i<g_totalSymbols; i++) {
+      g_symbolData[i].ichimokuHandle = INVALID_HANDLE;
       g_symbolData[i].lastAlertTenkan = 0;
       g_symbolData[i].lastAlertKijun = 0;
       g_symbolData[i].lastAlertSSB = 0;
    }
-   return(true);
 }
 
-void ReleaseHandles()
-{
-   for(int i = 0; i < ArraySize(g_symbolData); i++)
-   {
-      if(g_symbolData[i].ichimokuHandle != INVALID_HANDLE)
-      {
-         IndicatorRelease(g_symbolData[i].ichimokuHandle);
-         g_symbolData[i].ichimokuHandle = INVALID_HANDLE;
-      }
+//+------------------------------------------------------------------+
+//| Interface                                                        |
+//+------------------------------------------------------------------+
+void UpdateDashboard() {
+   string tfStr = StringSubstr(EnumToString(g_currentTF), 7);
+   UpdateLabel(g_prefix+"h1", "SCAN ICHIMOKU TOTAL - "+tfStr, InpXOffset, InpYOffset, InpHeaderColor);
+   UpdateLabel(g_prefix+"ram", "Symboles scannés: "+(string)g_totalSymbols, InpXOffset, InpYOffset+15, clrGray);
+   
+   int startY = InpYOffset + 50;
+   int lineHeight = InpFontSize + 6;
+
+   for(int i = 0; i < g_displayCount; i++) {
+      color clr = (g_finalResultsForDisplay[i].diff >= 0) ? clrLime : clrRed;
+      string line = StringFormat("%-8s | %-8.5f | %-6s | %+.2f%%", 
+                                 g_finalResultsForDisplay[i].sym, g_finalResultsForDisplay[i].prc, 
+                                 g_finalResultsForDisplay[i].line, g_finalResultsForDisplay[i].diff);
+      UpdateLabel(g_prefix+"row_"+(string)i, line, InpXOffset, startY + (i*lineHeight), clr);
    }
+
+   // Effacer les lignes en trop du scan précédent
+   for(int k = g_displayCount; k < g_lastRowCount; k++) ObjectDelete(0, g_prefix+"row_"+(string)k);
+   
+   g_lastRowCount = g_displayCount;
+   ObjectSetInteger(0, g_prefix+"bg", OBJPROP_YSIZE, 65 + (MathMax(1, g_displayCount) * lineHeight));
+   ChartRedraw();
 }
 
-double GetIchiValue(int handle, int bufferIdx)
-{
-   if(handle == INVALID_HANDLE) return 0.0;
+double GetIchiValue(int handle, int bufferIdx) {
    double buffer[];
    ArraySetAsSeries(buffer, true);
    if(CopyBuffer(handle, bufferIdx, 0, 1, buffer) <= 0) return 0.0;
    return buffer[0];
 }
 
-//+------------------------------------------------------------------+
-//| Interface Graphique                                              |
-//+------------------------------------------------------------------+
-void UpdateDashboard(ScanResult &data[], int count, long totalRam, long scriptRam, string tf)
-{
-   UpdateLabel(g_prefix+"h1", StringFormat("ICHIMOKU [%s] - Filtre Alignement Actif", tf), InpXOffset, InpYOffset, InpHeaderColor);
-   string ramTxt = StringFormat("Term RAM: %d MB | Script: %d MB", totalRam, scriptRam);
-   UpdateLabel(g_prefix+"ram", ramTxt, InpXOffset, InpYOffset + 15, (totalRam>InpMemWarningMB)?clrOrange:clrLime);
-   UpdateLabel(g_prefix+"cols", "Symbole  | Prix     | Ligne  | Dist %", InpXOffset, InpYOffset + 30, clrWhite);
+void ManageAlerts(int i, string line, double price, double dev, datetime now, int cooldown) {
+   bool a = false;
+   if(line=="Tenkan" && now - g_symbolData[i].lastAlertTenkan > cooldown) { a=true; g_symbolData[i].lastAlertTenkan=now; }
+   if(line=="Kijun" && now - g_symbolData[i].lastAlertKijun > cooldown)   { a=true; g_symbolData[i].lastAlertKijun=now; }
+   if(line=="SSB" && now - g_symbolData[i].lastAlertSSB > cooldown)       { a=true; g_symbolData[i].lastAlertSSB=now; }
    
-   int startY = InpYOffset + 50;
-   int lineHeight = InpFontSize + 6;
-   
-   if(count == 0)
-   {
-      UpdateLabel(g_prefix+"row_0", "Aucun actif aligné détecté...", InpXOffset, startY, clrGray);
-      count = 1; 
+   if(a && InpSendPush) {
+      SendNotification(StringFormat("Ichimoku %s: %s sur %s (%.2f%%)", StringSubstr(EnumToString(g_currentTF),7), line, g_symbolData[i].name, dev));
    }
-   else
-   {
-      for(int i = 0; i < count; i++)
-      {
-         color txtColor = (data[i].diff >= 0) ? clrLime : clrRed;
-         string lineStr = StringFormat("%-8s | %-8.5f | %-6s | %+.2f%%", 
-                                    data[i].sym, data[i].prc, data[i].line, data[i].diff);
-         UpdateLabel(g_prefix+"row_"+(string)i, lineStr, InpXOffset, startY + (i*lineHeight), txtColor);
-      }
-   }
-   
-   if(g_lastRowCount > count)
-   {
-      for(int k = count; k < g_lastRowCount; k++) ObjectDelete(0, g_prefix+"row_"+(string)k);
-   }
-   g_lastRowCount = count;
-   
-   int bgH = 65 + (count * lineHeight);
-   ObjectSetInteger(0, g_prefix+"bg", OBJPROP_YSIZE, bgH);
-   ChartRedraw();
 }
 
-void UpdateMemoryStatusUI()
-{
-   UpdateLabel(g_prefix+"h1", "!!! PAUSE RAM !!! Nettoyage...", InpXOffset, InpYOffset, clrRed);
-   ChartRedraw();
-}
-
-void UpdateLabel(string name, string text, int x, int y, color clr)
-{
-   if(ObjectFind(0, name) < 0)
-   {
+void UpdateLabel(string name, string text, int x, int y, color clr) {
+   if(ObjectFind(0, name) < 0) {
       ObjectCreate(0, name, OBJ_LABEL, 0, 0, 0);
-      ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
       ObjectSetInteger(0, name, OBJPROP_FONTSIZE, InpFontSize);
       ObjectSetString(0, name, OBJPROP_FONT, "Consolas"); 
-      ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
    }
    ObjectSetString(0, name, OBJPROP_TEXT, text);
    ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
@@ -348,26 +261,12 @@ void UpdateLabel(string name, string text, int x, int y, color clr)
    ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y);
 }
 
-void CreateBackground(int x, int y, int w, int h)
-{
+void CreateBackground(int x, int y, int w, int h) {
    string name = g_prefix + "bg";
-   if(ObjectFind(0, name) < 0)
-   {
-      ObjectCreate(0, name, OBJ_RECTANGLE_LABEL, 0, 0, 0);
-      ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-      ObjectSetInteger(0, name, OBJPROP_BGCOLOR, InpBgColor);
-      ObjectSetInteger(0, name, OBJPROP_BORDER_TYPE, BORDER_FLAT);
-   }
+   ObjectCreate(0, name, OBJ_RECTANGLE_LABEL, 0, 0, 0);
+   ObjectSetInteger(0, name, OBJPROP_BGCOLOR, InpBgColor);
    ObjectSetInteger(0, name, OBJPROP_XDISTANCE, x);
    ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y);
    ObjectSetInteger(0, name, OBJPROP_XSIZE, w);
    ObjectSetInteger(0, name, OBJPROP_YSIZE, h);
-}
-
-void SendAlert(string symbol, string line, double price, double diff, ENUM_TIMEFRAMES tf)
-{
-   if(!InpSendPush) return;
-   string msg = StringFormat("ALIGNEMENT ICHIMOKU %s: %s sur %s (%.2f%%)", 
-                             StringSubstr(EnumToString(tf), 7), line, symbol, diff);
-   SendNotification(msg);
 }
