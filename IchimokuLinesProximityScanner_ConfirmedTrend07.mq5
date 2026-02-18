@@ -1,10 +1,10 @@
 //+------------------------------------------------------------------+
 //|                            KijunScanner_Massive_v4.65_Flats.mq5  |
-//| Copyright 2026, Didier Le HPI - Millionnaire Stuff Prod DJED974  |
+//|                                  Copyright 2026, Didier Le HPI   |
 //+------------------------------------------------------------------+
 #property copyright "Didier Le HPI Réunionnais"
 #property link      "https://www.Didier-Le-HPI-Réunionnais.re"
-#property version   "4.65_Flats"
+#property version   "4.65_Flats_Fixed"
 #property strict
 
 //--- INPUTS
@@ -144,16 +144,24 @@ void OnTimer() {
    }
 }
 
+//--- FONCTION MODIFIEE POUR EVITER LES DOUBLONS ---
 void CheckHistoricalFlats(int symIdx, int bufferIdx, string label, double price, double t, double k, double a, double b, datetime now, int cooldown) {
    double buffer[]; ArraySetAsSeries(buffer, true);
    if(CopyBuffer(g_symbolData[symIdx].ichimokuHandle, bufferIdx, 1, InpFlatLookback, buffer) < InpMinFlatBars) return;
+   
+   // Valeur actuelle de la ligne correspondante pour comparaison
+   double currentVal = (bufferIdx == 0) ? t : (bufferIdx == 1 ? k : b);
+
    int count = 0;
    for(int j = 0; j < ArraySize(buffer) - 1; j++) {
       if(MathAbs(buffer[j] - buffer[j+1]) < _Point) {
          count++;
          if(count >= InpMinFlatBars - 1) {
-            CheckLogic(symIdx, buffer[j], t, k, a, b, label, price, now, cooldown);
-            return;
+            // On ne traite le plat que s'il est différent de la ligne actuelle
+            if(MathAbs(buffer[j] - currentVal) > _Point) {
+               CheckLogic(symIdx, buffer[j], t, k, a, b, label, price, now, cooldown);
+               return; 
+            }
          }
       } else count = 0;
    }
@@ -175,7 +183,7 @@ void CheckLogic(int symIdx, double lineVal, double t, double k, double a, double
 
          g_accumulatedResults[foundIdx].sym = currentSym;
          g_accumulatedResults[foundIdx].prc = price;
-         g_accumulatedResults[foundIdx].lvl = lineVal; // <-- Stockage du niveau
+         g_accumulatedResults[foundIdx].lvl = lineVal; 
          g_accumulatedResults[foundIdx].diff = dev;
          g_accumulatedResults[foundIdx].line = lineName;
          ManageAlerts(symIdx, lineName, price, dev, now, cooldown);
@@ -192,7 +200,6 @@ void UpdateDashboard() {
    int lineHeight = InpFontSize + 6;
    for(int i = 0; i < g_displayCount; i++) {
       color clr = (g_finalResultsForDisplay[i].diff >= 0) ? clrLime : clrRed;
-      // Affichage : SYMBOLE | P: PRIX | L: NIVEAU | LIGNE | DIFF
       string line = StringFormat("%-8s | P:%-8.5f | L:%-8.5f | %-10s | %+.2f%%", 
                                  g_finalResultsForDisplay[i].sym, 
                                  g_finalResultsForDisplay[i].prc, 
@@ -207,7 +214,6 @@ void UpdateDashboard() {
    ChartRedraw();
 }
 
-// ... (Reste des fonctions utilitaires identiques à la version précédente)
 void InitSymbolsList() {
    if(InpManualSymbols != "") {
       string temp[]; ushort sep = StringGetCharacter(",", 0);
@@ -226,12 +232,15 @@ void InitSymbolsList() {
       for(int i=0; i<total; i++) { g_symbolData[i].name = SymbolName(i, true); g_symbolData[i].ichimokuHandle = INVALID_HANDLE; }
    }
 }
+
 double GetIchiValue(int handle, int bufferIdx, int shift) {
    double buffer[]; ArraySetAsSeries(buffer, true);
    if(CopyBuffer(handle, bufferIdx, shift, 1, buffer) <= 0) return 0.0;
    return buffer[0];
 }
+
 void ForceDownloadHistory(string symbol, ENUM_TIMEFRAMES period) { datetime check[]; CopyTime(symbol, period, 0, 150, check); }
+
 void ManageAlerts(int i, string line, double price, double dev, datetime now, int cooldown) {
    bool a = false;
    if(line=="Tenkan" && now - g_symbolData[i].lastAlertTenkan > cooldown) { a=true; g_symbolData[i].lastAlertTenkan=now; }
@@ -240,10 +249,12 @@ void ManageAlerts(int i, string line, double price, double dev, datetime now, in
    if(StringFind(line,"(F)") >= 0 && now - g_symbolData[i].lastAlertFlat > cooldown) { a=true; g_symbolData[i].lastAlertFlat=now; }
    if(a && InpSendPush) SendNotification(StringFormat("Ichimoku %s: %s sur %s (%.2f%%)", StringSubstr(EnumToString(g_currentTF),7), line, g_symbolData[i].name, dev));
 }
+
 void UpdateLabel(string name, string text, int x, int y, color clr) {
    if(ObjectFind(0, name) < 0) { ObjectCreate(0, name, OBJ_LABEL, 0, 0, 0); ObjectSetInteger(0, name, OBJPROP_FONTSIZE, InpFontSize); ObjectSetString(0, name, OBJPROP_FONT, "Consolas"); }
    ObjectSetString(0, name, OBJPROP_TEXT, text); ObjectSetInteger(0, name, OBJPROP_COLOR, clr); ObjectSetInteger(0, name, OBJPROP_XDISTANCE, x); ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y);
 }
+
 void CreateBackground(int x, int y, int w, int h) {
    string name = g_prefix + "bg"; ObjectCreate(0, name, OBJ_RECTANGLE_LABEL, 0, 0, 0); ObjectSetInteger(0, name, OBJPROP_BGCOLOR, InpBgColor);
    ObjectSetInteger(0, name, OBJPROP_XDISTANCE, x); ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y); ObjectSetInteger(0, name, OBJPROP_XSIZE, w); ObjectSetInteger(0, name, OBJPROP_YSIZE, h);
