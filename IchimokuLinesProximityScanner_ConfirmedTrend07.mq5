@@ -1,6 +1,6 @@
 //+------------------------------------------------------------------+
 //|                            KijunScanner_Massive_v4.65_Flats.mq5  |
-//|                                  Copyright 2026, Didier Le HPI   |
+//| Copyright 2026, Didier Le HPI - Millionnaire Stuff Prod DJED974  |
 //+------------------------------------------------------------------+
 #property copyright "Didier Le HPI Réunionnais"
 #property link      "https://www.Didier-Le-HPI-Réunionnais.re"
