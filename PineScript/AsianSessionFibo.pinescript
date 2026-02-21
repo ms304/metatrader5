@@ -1,0 +1,127 @@
+//@version=5
+indicator("Asia Session + Fibs (Infinite & Labels)", overlay=true)
+
+// --- INPUTS ---
+tradeRange = input.session("1800-0200:1234567", "Session (UTC)")
+
+// Style visuel
+c_lines = input.color(color.orange, "Couleur des lignes/texte")
+s_lines = line.style_dashed 
+w_lines = input.int(1, "Épaisseur")
+bg_color = input.color(color.new(color.orange, 90), "Fond de la session")
+
+// Options Lignes & Texte
+keep_infinite = input.bool(false, "Garder TOUTES les anciennes lignes à l'infini")
+show_labels = input.bool(true, "Afficher le texte")
+label_offset = input.int(10, "Décalage du texte (Marge droite)") 
+
+// --- VARIABLES ---
+var float sHigh = na
+var float sLow = na
+var int sStart = na
+
+// Lignes 
+var line l_ah = na, var line l_am = na, var line l_al = na
+var line l_up1 = na, var line l_up2 = na, var line l_up3 = na, var line l_up4 = na, var line l_up5 = na
+var line l_dn1 = na, var line l_dn2 = na, var line l_dn3 = na, var line l_dn4 = na, var line l_dn5 = na
+
+// Labels
+var label lbl_ah = na, var label lbl_am = na, var label lbl_al = na
+var label lbl_up1 = na, var label lbl_up2 = na, var label lbl_up3 = na, var label lbl_up4 = na, var label lbl_up5 = na
+var label lbl_dn1 = na, var label lbl_dn2 = na, var label lbl_dn3 = na, var label lbl_dn4 = na, var label lbl_dn5 = na
+
+// Détection Session
+sessionStr = str.length(tradeRange) <= 11 ? tradeRange + ":1234567" : tradeRange
+inSession = not na(time(timeframe.period, sessionStr))
+sessionStart = inSession and not inSession[1]
+sessionEnd = not inSession and inSession[1]
+
+// --- FONCTIONS ---
+freeze_line(l) =>
+    if not na(l) and not keep_infinite
+        line.set_extend(l, extend.none)
+        line.set_x2(l, time)
+
+draw_infinite_line(y, style) =>
+    // extend.right projette la ligne jusqu'au bout de l'écran à droite
+    line.new(time, y, time + 1000, y, xloc.bar_time, extend.right, c_lines, style, w_lines)
+
+create_label(y, txt) =>
+    if show_labels
+        txtContent = txt + " : " + str.tostring(y, format.mintick)
+        label.new(bar_index + label_offset, y, txtContent, xloc.bar_index, yloc.price, color.new(color.black, 100), label.style_none, c_lines, size.normal, text.align_left)
+    else
+        label(na)
+
+move_label(lbl) =>
+    if show_labels and not na(lbl)
+        label.set_x(lbl, bar_index + label_offset)
+
+// --- LOGIQUE PRINCIPALE ---
+
+if sessionStart
+    sHigh := high
+    sLow := low
+    sStart := time
+    // On NE supprime PLUS les lignes ici ! Elles restent visibles pour servir de repère pendant la session actuelle.
+
+if inSession
+    sHigh := math.max(sHigh, high)
+    sLow  := math.min(sLow, low)
+
+if sessionEnd
+    // 1. ON EFFACE LES ANCIENNES LIGNES SEULEMENT ICI (juste avant de tracer les nouvelles)
+    freeze_line(l_ah), freeze_line(l_am), freeze_line(l_al)
+    freeze_line(l_up1), freeze_line(l_up2), freeze_line(l_up3), freeze_line(l_up4), freeze_line(l_up5)
+    freeze_line(l_dn1), freeze_line(l_dn2), freeze_line(l_dn3), freeze_line(l_dn4), freeze_line(l_dn5)
+    
+    label.delete(lbl_ah), label.delete(lbl_am), label.delete(lbl_al)
+    label.delete(lbl_up1), label.delete(lbl_up2), label.delete(lbl_up3), label.delete(lbl_up4), label.delete(lbl_up5)
+    label.delete(lbl_dn1), label.delete(lbl_dn2), label.delete(lbl_dn3), label.delete(lbl_dn4), label.delete(lbl_dn5)
+
+    // 2. DESSIN DE LA BOITE DE LA SESSION TERMINÉE
+    box.new(sStart, sHigh, time, sLow, color.new(color.white,100), 0, line.style_solid, extend.none, xloc.bar_time, bg_color)
+    
+    mid = (sHigh + sLow) / 2
+    dist_up = sHigh - mid
+    dist_dn = mid - sLow
+    
+    // 3. TRACÉ DES NOUVELLES LIGNES INFINIES
+    l_ah := draw_infinite_line(sHigh, s_lines)
+    l_am := draw_infinite_line(mid, line.style_dotted)
+    l_al := draw_infinite_line(sLow, s_lines)
+    
+    l_up1 := draw_infinite_line(mid + (dist_up * 1.618), s_lines)
+    l_up2 := draw_infinite_line(mid + (dist_up * 2.618), s_lines)
+    l_up3 := draw_infinite_line(mid + (dist_up * 3.618), s_lines)
+    l_up4 := draw_infinite_line(mid + (dist_up * 4.618), s_lines) 
+    l_up5 := draw_infinite_line(mid + (dist_up * 5.618), s_lines) 
+    
+    l_dn1 := draw_infinite_line(mid - (dist_dn * 1.618), s_lines)
+    l_dn2 := draw_infinite_line(mid - (dist_dn * 2.618), s_lines)
+    l_dn3 := draw_infinite_line(mid - (dist_dn * 3.618), s_lines)
+    l_dn4 := draw_infinite_line(mid - (dist_dn * 4.618), s_lines) 
+    l_dn5 := draw_infinite_line(mid - (dist_dn * 5.618), s_lines) 
+    
+    // 4. CRÉATION DES LABELS (Textes + Prix des Niveaux)
+    lbl_ah := create_label(sHigh, "AH")
+    lbl_am := create_label(mid, "AM")
+    lbl_al := create_label(sLow, "AL")
+    
+    lbl_up1 := create_label(mid + (dist_up * 1.618), "Fib +1.618")
+    lbl_up2 := create_label(mid + (dist_up * 2.618), "Fib +2.618")
+    lbl_up3 := create_label(mid + (dist_up * 3.618), "Fib +3.618")
+    lbl_up4 := create_label(mid + (dist_up * 4.618), "Fib +4.618") 
+    lbl_up5 := create_label(mid + (dist_up * 5.618), "Fib +5.618") 
+    
+    lbl_dn1 := create_label(mid - (dist_dn * 1.618), "Fib -1.618")
+    lbl_dn2 := create_label(mid - (dist_dn * 2.618), "Fib -2.618")
+    lbl_dn3 := create_label(mid - (dist_dn * 3.618), "Fib -3.618")
+    lbl_dn4 := create_label(mid - (dist_dn * 4.618), "Fib -4.618") 
+    lbl_dn5 := create_label(mid - (dist_dn * 5.618), "Fib -5.618") 
+
+// 5. MISE À JOUR EN TEMPS RÉEL (Pousse toujours les étiquettes à l'extrême droite)
+if barstate.islast
+    move_label(lbl_ah), move_label(lbl_am), move_label(lbl_al)
+    move_label(lbl_up1), move_label(lbl_up2), move_label(lbl_up3), move_label(lbl_up4), move_label(lbl_up5)
+    move_label(lbl_dn1), move_label(lbl_dn2), move_label(lbl_dn3), move_label(lbl_dn4), move_label(lbl_dn5)
