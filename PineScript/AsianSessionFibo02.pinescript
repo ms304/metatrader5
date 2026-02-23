@@ -1,8 +1,7 @@
 //@version=5
-indicator("Asia Session + Fibs (Infinite & Labels) - UTC Fixed", overlay=true)
+indicator("Asia Session + Fibs (Infinite & Labels)", overlay=true)
 
 // --- INPUTS ---
-// On ajoute explicitement (UTC) dans le titre pour plus de clarté
 tradeRange = input.session("1800-0200:1234567", "Session (UTC)")
 
 // Style visuel
@@ -15,13 +14,13 @@ bg_color = input.color(color.new(color.orange, 90), "Fond de la session")
 keep_infinite = input.bool(false, "Garder TOUTES les anciennes lignes à l'infini")
 show_labels = input.bool(true, "Afficher le texte")
 label_offset = input.int(10, "Décalage texte Session/Fibs") 
-label_offset_htf = input.int(30, "Décalage texte HTF (PDH, PWH...)") 
+label_offset_htf = input.int(30, "Décalage texte HTF (PDH, PWH...)")
 
 // --- VARIABLES ---
 var float sHigh = na
 var float sLow = na
 var int sStart = na
-var box b_session = na 
+var box b_session = na
 
 // Lignes & Labels Session
 var line l_ah = na, var line l_am = na, var line l_al = na
@@ -32,25 +31,22 @@ var label lbl_up1 = na, var label lbl_up2 = na, var label lbl_up3 = na, var labe
 var label lbl_dn1 = na, var label lbl_dn2 = na, var label lbl_dn3 = na, var label lbl_dn4 = na, var label lbl_dn5 = na
 
 // Lignes & Labels HTF
-var line l_pdh = na, var line l_pdl = na, var line l_pwh = na, var line l_pwl = na, var line l_pmh = na, var line l_pml = na
-var label lbl_pdh = na, var label lbl_pdl = na, var label lbl_pwh = na, var label lbl_pwl = na, var label lbl_pmh = na, var label lbl_pml = na
+var line l_pdh = na, var line l_pdl = na, var line l_pwh = na, var line l_pwl = na
+var label lbl_pdh = na, var label lbl_pdl = na, var label lbl_pwh = na, var label lbl_pwl = na
 
 // --- LOGIQUE DE TEMPS ---
-// MODIFICATION CRUCIALE : Ajout de "UTC" pour corriger le décalage 00:00-08:00
 sessionStr = str.length(tradeRange) <= 11 ? tradeRange + ":1234567" : tradeRange
-inSession = not na(time(timeframe.period, sessionStr, "UTC")) 
+// AJOUT "UTC" ici pour corriger le décalage horaire
+inSession = not na(time(timeframe.period, sessionStr, "UTC"))
 sessionStart = inSession and not inSession[1]
 sessionEnd = not inSession and inSession[1]
-
-// Détection nouveau jour (pour nettoyage au réveil le lundi par exemple)
 isNewDay = ta.change(time("D", "UTC"))
 
 // Récupération des données HTF
 [pdh, pdl] = request.security(syminfo.tickerid, "1D", [high[1], low[1]], lookahead=barmerge.lookahead_on)
 [pwh, pwl] = request.security(syminfo.tickerid, "1W", [high[1], low[1]], lookahead=barmerge.lookahead_on)
-[pmh, pml] = request.security(syminfo.tickerid, "1M", [high[1], low[1]], lookahead=barmerge.lookahead_on)
 
-// --- FONCTIONS ---
+// --- FONCTIONS (Modifiées pour suppression réelle) ---
 freeze_line(l) =>
     if not na(l) and not keep_infinite
         line.delete(l)
@@ -59,7 +55,7 @@ draw_infinite_line(y, style) =>
     line.new(time, y, time + 1000, y, xloc.bar_time, extend.right, c_lines, style, w_lines)
 
 create_label(y, txt, offset) =>
-    if show_labels
+    if show_labels and not na(y)
         txtContent = txt + " : " + str.tostring(y, format.mintick)
         label.new(bar_index + offset, y, txtContent, xloc.bar_index, yloc.price, color.new(color.black, 100), label.style_none, c_lines, size.normal, text.align_left)
     else
@@ -69,14 +65,10 @@ move_label(lbl, offset) =>
     if show_labels and not na(lbl)
         label.set_x(lbl, bar_index + offset)
 
-// --- LOGIQUE DE NETTOYAGE (Lundi / Nouveau jour) ---
+// --- NETTOYAGE LUNDI / NOUVEAU JOUR ---
 if isNewDay and not keep_infinite
     freeze_line(l_ah), freeze_line(l_am), freeze_line(l_al)
-    freeze_line(l_up1), freeze_line(l_up2), freeze_line(l_up3), freeze_line(l_up4), freeze_line(l_up5)
-    freeze_line(l_dn1), freeze_line(l_dn2), freeze_line(l_dn3), freeze_line(l_dn4), freeze_line(l_dn5)
     label.delete(lbl_ah), label.delete(lbl_am), label.delete(lbl_al)
-    label.delete(lbl_up1), label.delete(lbl_up2), label.delete(lbl_up3), label.delete(lbl_up4), label.delete(lbl_up5)
-    label.delete(lbl_dn1), label.delete(lbl_dn2), label.delete(lbl_dn3), label.delete(lbl_dn4), label.delete(lbl_dn5)
     box.delete(b_session)
 
 // --- LOGIQUE PRINCIPALE ---
@@ -90,17 +82,17 @@ if inSession
     sLow  := math.min(sLow, low)
 
 if sessionEnd
-    // Suppression session précédente
+    // 1. EFFACER ANCIENNES LIGNES
     freeze_line(l_ah), freeze_line(l_am), freeze_line(l_al)
     freeze_line(l_up1), freeze_line(l_up2), freeze_line(l_up3), freeze_line(l_up4), freeze_line(l_up5)
     freeze_line(l_dn1), freeze_line(l_dn2), freeze_line(l_dn3), freeze_line(l_dn4), freeze_line(l_dn5)
+    
     label.delete(lbl_ah), label.delete(lbl_am), label.delete(lbl_al)
     label.delete(lbl_up1), label.delete(lbl_up2), label.delete(lbl_up3), label.delete(lbl_up4), label.delete(lbl_up5)
     label.delete(lbl_dn1), label.delete(lbl_dn2), label.delete(lbl_dn3), label.delete(lbl_dn4), label.delete(lbl_dn5)
-    if not keep_infinite
-        box.delete(b_session)
+    box.delete(b_session)
 
-    // Tracé de la nouvelle session
+    // 2. DESSIN SESSION
     b_session := box.new(sStart, sHigh, time, sLow, color.new(color.white,100), 0, line.style_solid, extend.none, xloc.bar_time, bg_color)
     mid = (sHigh + sLow) / 2
     dist_up = sHigh - mid
@@ -116,27 +108,32 @@ if sessionEnd
     lbl_up1 := create_label(mid + (dist_up * 1.618), "Fib +1.618", label_offset), lbl_up2 := create_label(mid + (dist_up * 2.618), "Fib +2.618", label_offset), lbl_up3 := create_label(mid + (dist_up * 3.618), "Fib +3.618", label_offset), lbl_up4 := create_label(mid + (dist_up * 4.618), "Fib +4.618", label_offset), lbl_up5 := create_label(mid + (dist_up * 5.618), "Fib +5.618", label_offset) 
     lbl_dn1 := create_label(mid - (dist_dn * 1.618), "Fib -1.618", label_offset), lbl_dn2 := create_label(mid - (dist_dn * 2.618), "Fib -2.618", label_offset), lbl_dn3 := create_label(mid - (dist_dn * 3.618), "Fib -3.618", label_offset), lbl_dn4 := create_label(mid - (dist_dn * 4.618), "Fib -4.618", label_offset), lbl_dn5 := create_label(mid - (dist_dn * 5.618), "Fib -5.618", label_offset) 
 
-// Mise à jour des Lignes HTF
-if not na(pdh) and (na(l_pdh) or pdh != pdh[1])
-    freeze_line(l_pdh), freeze_line(l_pdl), label.delete(lbl_pdh), label.delete(lbl_pdl)
-    l_pdh := draw_infinite_line(pdh, s_lines), l_pdl := draw_infinite_line(pdl, s_lines)
-    lbl_pdh := create_label(pdh, "PDH", label_offset_htf), lbl_pdl := create_label(pdl, "PDL", label_offset_htf)
+// --- GESTION HTF (Correction PDH/PWH doublés) ---
+if not na(pdh) and (na(l_pdh) or ta.change(pdh) or ta.change(pwh))
+    freeze_line(l_pdh), freeze_line(l_pdl), freeze_line(l_pwh), freeze_line(l_pwl)
+    label.delete(lbl_pdh), label.delete(lbl_pdl), label.delete(lbl_pwh), label.delete(lbl_pwl)
+    
+    // Fusion des textes si les prix sont identiques (fréquent le lundi)
+    txt_pdh = (pdh == pwh) ? "PDH / PWH" : "PDH"
+    txt_pdl = (pdl == pwl) ? "PDL / PWL" : "PDL"
+    
+    l_pdh := draw_infinite_line(pdh, s_lines)
+    l_pdl := draw_infinite_line(pdl, s_lines)
+    lbl_pdh := create_label(pdh, txt_pdh, label_offset_htf)
+    lbl_pdl := create_label(pdl, txt_pdl, label_offset_htf)
+    
+    // On ne trace PWH/PWL que s'ils sont différents de PDH/PDL
+    if pwh != pdh
+        l_pwh := draw_infinite_line(pwh, s_lines)
+        lbl_pwh := create_label(pwh, "PWH", label_offset_htf)
+    if pwl != pdl
+        l_pwl := draw_infinite_line(pwl, s_lines)
+        lbl_pwl := create_label(pwl, "PWL", label_offset_htf)
 
-if not na(pwh) and (na(l_pwh) or pwh != pwh[1])
-    freeze_line(l_pwh), freeze_line(l_pwl), label.delete(lbl_pwh), label.delete(lbl_pwl)
-    l_pwh := draw_infinite_line(pwh, s_lines), l_pwl := draw_infinite_line(pwl, s_lines)
-    lbl_pwh := create_label(pwh, "PWH", label_offset_htf), lbl_pwl := create_label(pwl, "PWL", label_offset_htf)
-
-if not na(pmh) and (na(l_pmh) or pmh != pmh[1])
-    freeze_line(l_pmh), freeze_line(l_pml), label.delete(lbl_pmh), label.delete(lbl_pml)
-    l_pmh := draw_infinite_line(pmh, s_lines), l_pml := draw_infinite_line(pml, s_lines)
-    lbl_pmh := create_label(pmh, "PMH", label_offset_htf), lbl_pml := create_label(pml, "PML", label_offset_htf)
-
-// Actualisation labels
+// --- MISE À JOUR TEMPS RÉEL ---
 if barstate.islast
     move_label(lbl_ah, label_offset), move_label(lbl_am, label_offset), move_label(lbl_al, label_offset)
     move_label(lbl_up1, label_offset), move_label(lbl_up2, label_offset), move_label(lbl_up3, label_offset), move_label(lbl_up4, label_offset), move_label(lbl_up5, label_offset)
     move_label(lbl_dn1, label_offset), move_label(lbl_dn2, label_offset), move_label(lbl_dn3, label_offset), move_label(lbl_dn4, label_offset), move_label(lbl_dn5, label_offset)
     move_label(lbl_pdh, label_offset_htf), move_label(lbl_pdl, label_offset_htf)
     move_label(lbl_pwh, label_offset_htf), move_label(lbl_pwl, label_offset_htf)
-    move_label(lbl_pmh, label_offset_htf), move_label(lbl_pml, label_offset_htf)
