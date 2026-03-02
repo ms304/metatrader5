@@ -1,0 +1,140 @@
+//@version=5
+indicator("Asia Session + Fibs (Corrected Timing)", overlay=true)
+
+// --- INPUTS ---
+// Suppression du :1234567 forcé pour laisser l'utilisateur choisir ou utiliser le défaut
+tradeRange = input.session("1800-0200", "Session Hours")
+
+// Style visuel
+c_lines = input.color(color.orange, "Couleur des lignes/texte")
+s_lines = line.style_dashed 
+w_lines = input.int(1, "Épaisseur")
+bg_color = input.color(color.new(color.orange, 90), "Fond de la session")
+
+// Options Lignes & Texte
+keep_infinite = input.bool(false, "Garder TOUTES les anciennes lignes à l'infini")
+show_labels = input.bool(true, "Afficher le texte")
+label_offset = input.int(10, "Décalage texte Session/Fibs") 
+label_offset_htf = input.int(30, "Décalage texte HTF (PDH, PWH...)")
+
+// --- VARIABLES ---
+var float sHigh = na
+var float sLow = na
+var int sStart = na
+var box b_session = na
+
+// Lignes & Labels Session
+var line l_ah = na, var line l_am = na, var line l_al = na
+var line l_up1 = na, var line l_up2 = na, var line l_up3 = na, var line l_up4 = na, var line l_up5 = na
+var line l_dn1 = na, var line l_dn2 = na, var line l_dn3 = na, var line l_dn4 = na, var line l_dn5 = na
+var label lbl_ah = na, var label lbl_am = na, var label lbl_al = na
+var label lbl_up1 = na, var label lbl_up2 = na, var label lbl_up3 = na, var label lbl_up4 = na, var label lbl_up5 = na
+var label lbl_dn1 = na, var label lbl_dn2 = na, var label lbl_dn3 = na, var label lbl_dn4 = na, var label lbl_dn5 = na
+
+// Lignes & Labels HTF
+var line l_pdh = na, var line l_pdl = na, var line l_pwh = na, var line l_pwl = na
+var label lbl_pdh = na, var label lbl_pdl = na, var label lbl_pwh = na, var label lbl_pwl = na
+
+// --- LOGIQUE DE TEMPS ---
+// Correction ici : On enlève le fuseau "UTC" pour matcher le comportement du script v4
+inSession = not na(time(timeframe.period, tradeRange))
+sessionStart = inSession and not inSession[1]
+sessionEnd = not inSession and inSession[1]
+// Nouveau jour basé sur l'échange également
+isNewDay = ta.change(time("D"))
+
+// Récupération des données HTF
+[pdh, pdl] = request.security(syminfo.tickerid, "1D", [high[1], low[1]], lookahead=barmerge.lookahead_on)
+[pwh, pwl] = request.security(syminfo.tickerid, "1W", [high[1], low[1]], lookahead=barmerge.lookahead_on)
+
+// --- FONCTIONS ---
+freeze_line(l) =>
+    if not na(l) and not keep_infinite
+        line.delete(l)
+
+draw_infinite_line(y, style) =>
+    line.new(time, y, time + 1000, y, xloc.bar_time, extend.right, c_lines, style, w_lines)
+
+create_label(y, txt, offset) =>
+    if show_labels and not na(y)
+        txtContent = txt + " : " + str.tostring(y, format.mintick)
+        label.new(bar_index + offset, y, txtContent, xloc.bar_index, yloc.price, color.new(color.black, 100), label.style_none, c_lines, size.normal, text.align_left)
+    else
+        label(na)
+
+move_label(lbl, offset) =>
+    if show_labels and not na(lbl)
+        label.set_x(lbl, bar_index + offset)
+
+// --- NETTOYAGE NOUVEAU JOUR ---
+if isNewDay and not keep_infinite
+    freeze_line(l_ah), freeze_line(l_am), freeze_line(l_al)
+    label.delete(lbl_ah), label.delete(lbl_am), label.delete(lbl_al)
+    box.delete(b_session)
+
+// --- LOGIQUE PRINCIPALE ---
+if sessionStart
+    sHigh := high
+    sLow := low
+    sStart := time
+
+if inSession
+    sHigh := math.max(sHigh, high)
+    sLow  := math.min(sLow, low)
+
+if sessionEnd
+    // 1. EFFACER ANCIENNES LIGNES
+    freeze_line(l_ah), freeze_line(l_am), freeze_line(l_al)
+    freeze_line(l_up1), freeze_line(l_up2), freeze_line(l_up3), freeze_line(l_up4), freeze_line(l_up5)
+    freeze_line(l_dn1), freeze_line(l_dn2), freeze_line(l_dn3), freeze_line(l_dn4), freeze_line(l_dn5)
+    
+    label.delete(lbl_ah), label.delete(lbl_am), label.delete(lbl_al)
+    label.delete(lbl_up1), label.delete(lbl_up2), label.delete(lbl_up3), label.delete(lbl_up4), label.delete(lbl_up5)
+    label.delete(lbl_dn1), label.delete(lbl_dn2), label.delete(lbl_dn3), label.delete(lbl_dn4), label.delete(lbl_dn5)
+    box.delete(b_session)
+
+    // 2. DESSIN SESSION
+    b_session := box.new(sStart, sHigh, time, sLow, color.new(color.white,100), 0, line.style_solid, extend.none, xloc.bar_time, bg_color)
+    mid = (sHigh + sLow) / 2
+    dist_up = sHigh - mid
+    dist_dn = mid - sLow
+    
+    l_ah := draw_infinite_line(sHigh, s_lines)
+    l_am := draw_infinite_line(mid, line.style_dotted)
+    l_al := draw_infinite_line(sLow, s_lines)
+    
+    // Fibs
+    l_up1 := draw_infinite_line(mid + (dist_up * 1.618), s_lines), l_up2 := draw_infinite_line(mid + (dist_up * 2.618), s_lines), l_up3 := draw_infinite_line(mid + (dist_up * 3.618), s_lines), l_up4 := draw_infinite_line(mid + (dist_up * 4.618), s_lines), l_up5 := draw_infinite_line(mid + (dist_up * 5.618), s_lines) 
+    l_dn1 := draw_infinite_line(mid - (dist_dn * 1.618), s_lines), l_dn2 := draw_infinite_line(mid - (dist_dn * 2.618), s_lines), l_dn3 := draw_infinite_line(mid - (dist_dn * 3.618), s_lines), l_dn4 := draw_infinite_line(mid - (dist_dn * 4.618), s_lines), l_dn5 := draw_infinite_line(mid - (dist_dn * 5.618), s_lines) 
+    
+    lbl_ah := create_label(sHigh, "AH", label_offset), lbl_am := create_label(mid, "AM", label_offset), lbl_al := create_label(sLow, "AL", label_offset)
+    lbl_up1 := create_label(mid + (dist_up * 1.618), "Fib +1.618", label_offset), lbl_up2 := create_label(mid + (dist_up * 2.618), "Fib +2.618", label_offset), lbl_up3 := create_label(mid + (dist_up * 3.618), "Fib +3.618", label_offset), lbl_up4 := create_label(mid + (dist_up * 4.618), "Fib +4.618", label_offset), lbl_up5 := create_label(mid + (dist_up * 5.618), "Fib +5.618", label_offset) 
+    lbl_dn1 := create_label(mid - (dist_dn * 1.618), "Fib -1.618", label_offset), lbl_dn2 := create_label(mid - (dist_dn * 2.618), "Fib -2.618", label_offset), lbl_dn3 := create_label(mid - (dist_dn * 3.618), "Fib -3.618", label_offset), lbl_dn4 := create_label(mid - (dist_dn * 4.618), "Fib -4.618", label_offset), lbl_dn5 := create_label(mid - (dist_dn * 5.618), "Fib -5.618", label_offset) 
+
+// --- GESTION HTF ---
+if not na(pdh) and (na(l_pdh) or ta.change(pdh) or ta.change(pwh))
+    freeze_line(l_pdh), freeze_line(l_pdl), freeze_line(l_pwh), freeze_line(l_pwl)
+    label.delete(lbl_pdh), label.delete(lbl_pdl), label.delete(lbl_pwh), label.delete(lbl_pwl)
+    
+    txt_pdh = (pdh == pwh) ? "PDH / PWH" : "PDH"
+    txt_pdl = (pdl == pwl) ? "PDL / PWL" : "PDL"
+    
+    l_pdh := draw_infinite_line(pdh, s_lines)
+    l_pdl := draw_infinite_line(pdl, s_lines)
+    lbl_pdh := create_label(pdh, txt_pdh, label_offset_htf)
+    lbl_pdl := create_label(pdl, txt_pdl, label_offset_htf)
+    
+    if pwh != pdh
+        l_pwh := draw_infinite_line(pwh, s_lines)
+        lbl_pwh := create_label(pwh, "PWH", label_offset_htf)
+    if pwl != pdl
+        l_pwl := draw_infinite_line(pwl, s_lines)
+        lbl_pwl := create_label(pwl, "PWL", label_offset_htf)
+
+// --- MISE À JOUR TEMPS RÉEL ---
+if barstate.islast
+    move_label(lbl_ah, label_offset), move_label(lbl_am, label_offset), move_label(lbl_al, label_offset)
+    move_label(lbl_up1, label_offset), move_label(lbl_up2, label_offset), move_label(lbl_up3, label_offset), move_label(lbl_up4, label_offset), move_label(lbl_up5, label_offset)
+    move_label(lbl_dn1, label_offset), move_label(lbl_dn2, label_offset), move_label(lbl_dn3, label_offset), move_label(lbl_dn4, label_offset), move_label(lbl_dn5, label_offset)
+    move_label(lbl_pdh, label_offset_htf), move_label(lbl_pdl, label_offset_htf)
+    move_label(lbl_pwh, label_offset_htf), move_label(lbl_pwl, label_offset_htf)
