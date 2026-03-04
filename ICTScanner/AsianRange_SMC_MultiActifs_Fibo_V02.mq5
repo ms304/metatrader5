@@ -46,34 +46,34 @@ int OnCalculate(const int rates_total, const int prev_calculated, const int begi
       double mid = (h + l) / 2.0;
       double dist = h - mid; 
 
-      // 1. Dessin
+      // 1. Dessin des lignes principales
       DrawBox(g_prefix+"RECT", sTime, eTime, h, l);
-      DrawLine(g_prefix+"HIGH", sTime, eTime + (6*3600), h, ColorHighLow, 2, STYLE_SOLID, "Asian High");
-      DrawLine(g_prefix+"LOW", sTime, eTime + (6*3600), l, ColorHighLow, 2, STYLE_SOLID, "Asian Low");
-      DrawLine(g_prefix+"MID", sTime, eTime, mid, clrOrange, 1, STYLE_DOT, "Equilibrium");
+      DrawLine(g_prefix+"HIGH", sTime, eTime + (6*3600), h, ColorHighLow, 2, STYLE_SOLID, "Asian High : " + DoubleToString(h, _Digits));
+      DrawLine(g_prefix+"LOW", sTime, eTime + (6*3600), l, ColorHighLow, 2, STYLE_SOLID, "Asian Low : " + DoubleToString(l, _Digits));
+      DrawLine(g_prefix+"MID", sTime, eTime, mid, clrOrange, 1, STYLE_DOT, "Equilibrium : " + DoubleToString(mid, _Digits));
 
       if(ShowFibo) {
          datetime fibEndTime = eTime + (FiboExtendHours * 3600);
          
-         // Extensions vers le HAUT (Intégration du niveau dans le nom de la ligne)
-         DrawLine(g_prefix+"FIB_H_0.618", eTime, fibEndTime, mid + (dist * 0.618), ColorFibo, 1, STYLE_DASH, "+0.618 Fib");
-         DrawLine(g_prefix+"FIB_H_1.272", eTime, fibEndTime, mid + (dist * 1.272), ColorFibo, 1, STYLE_DASH, "+1.272 Fib");
-         DrawLine(g_prefix+"FIB_H_1.618", eTime, fibEndTime, mid + (dist * 1.618), ColorFibo, 1, STYLE_DASH, "+1.618 Fib");
-         DrawLine(g_prefix+"FIB_H_2.000", eTime, fibEndTime, mid + (dist * 2.000), ColorFibo, 1, STYLE_DASH, "+2.000 Fib");
-         DrawLine(g_prefix+"FIB_H_2.618", eTime, fibEndTime, mid + (dist * 2.618), ColorFibo, 1, STYLE_DASH, "+2.618 Fib");
-         DrawLine(g_prefix+"FIB_H_3.618", eTime, fibEndTime, mid + (dist * 3.618), ColorFibo, 1, STYLE_DASH, "+3.618 Fib");
-         DrawLine(g_prefix+"FIB_H_4.236", eTime, fibEndTime, mid + (dist * 4.236), ColorFibo, 1, STYLE_DASH, "+4.236 Fib");
-         DrawLine(g_prefix+"FIB_H_5.000", eTime, fibEndTime, mid + (dist * 5.000), ColorFibo, 1, STYLE_DASH, "+5.000 Fib");
+         // Extensions vers le HAUT (Intégration du niveau ET du prix dans la description)
+         DrawLine(g_prefix+"FIB_H_0.618", eTime, fibEndTime, mid + (dist * 0.618), ColorFibo, 1, STYLE_DASH, "+0.618 Fib : " + DoubleToString(mid + (dist * 0.618), _Digits));
+         DrawLine(g_prefix+"FIB_H_1.272", eTime, fibEndTime, mid + (dist * 1.272), ColorFibo, 1, STYLE_DASH, "+1.272 Fib : " + DoubleToString(mid + (dist * 1.272), _Digits));
+         DrawLine(g_prefix+"FIB_H_1.618", eTime, fibEndTime, mid + (dist * 1.618), ColorFibo, 1, STYLE_DASH, "+1.618 Fib : " + DoubleToString(mid + (dist * 1.618), _Digits));
+         DrawLine(g_prefix+"FIB_H_2.000", eTime, fibEndTime, mid + (dist * 2.000), ColorFibo, 1, STYLE_DASH, "+2.000 Fib : " + DoubleToString(mid + (dist * 2.000), _Digits));
+         DrawLine(g_prefix+"FIB_H_2.618", eTime, fibEndTime, mid + (dist * 2.618), ColorFibo, 1, STYLE_DASH, "+2.618 Fib : " + DoubleToString(mid + (dist * 2.618), _Digits));
+         DrawLine(g_prefix+"FIB_H_3.618", eTime, fibEndTime, mid + (dist * 3.618), ColorFibo, 1, STYLE_DASH, "+3.618 Fib : " + DoubleToString(mid + (dist * 3.618), _Digits));
+         DrawLine(g_prefix+"FIB_H_4.236", eTime, fibEndTime, mid + (dist * 4.236), ColorFibo, 1, STYLE_DASH, "+4.236 Fib : " + DoubleToString(mid + (dist * 4.236), _Digits));
+         DrawLine(g_prefix+"FIB_H_5.000", eTime, fibEndTime, mid + (dist * 5.000), ColorFibo, 1, STYLE_DASH, "+5.000 Fib : " + DoubleToString(mid + (dist * 5.000), _Digits));
          
-         // Extensions vers le BAS (Intégration du niveau dans le nom de la ligne)
-         DrawLine(g_prefix+"FIB_L_0.618", eTime, fibEndTime, mid - (dist * 0.618), ColorFibo, 1, STYLE_DASH, "-0.618 Fib");
-         DrawLine(g_prefix+"FIB_L_1.272", eTime, fibEndTime, mid - (dist * 1.272), ColorFibo, 1, STYLE_DASH, "-1.272 Fib");
-         DrawLine(g_prefix+"FIB_L_1.618", eTime, fibEndTime, mid - (dist * 1.618), ColorFibo, 1, STYLE_DASH, "-1.618 Fib");
-         DrawLine(g_prefix+"FIB_L_2.000", eTime, fibEndTime, mid - (dist * 2.000), ColorFibo, 1, STYLE_DASH, "-2.000 Fib");
-         DrawLine(g_prefix+"FIB_L_2.618", eTime, fibEndTime, mid - (dist * 2.618), ColorFibo, 1, STYLE_DASH, "-2.618 Fib");
-         DrawLine(g_prefix+"FIB_L_3.618", eTime, fibEndTime, mid - (dist * 3.618), ColorFibo, 1, STYLE_DASH, "-3.618 Fib");
-         DrawLine(g_prefix+"FIB_L_4.236", eTime, fibEndTime, mid - (dist * 4.236), ColorFibo, 1, STYLE_DASH, "-4.236 Fib");
-         DrawLine(g_prefix+"FIB_L_5.000", eTime, fibEndTime, mid - (dist * 5.000), ColorFibo, 1, STYLE_DASH, "-5.000 Fib");
+         // Extensions vers le BAS (Intégration du niveau ET du prix dans la description)
+         DrawLine(g_prefix+"FIB_L_0.618", eTime, fibEndTime, mid - (dist * 0.618), ColorFibo, 1, STYLE_DASH, "-0.618 Fib : " + DoubleToString(mid - (dist * 0.618), _Digits));
+         DrawLine(g_prefix+"FIB_L_1.272", eTime, fibEndTime, mid - (dist * 1.272), ColorFibo, 1, STYLE_DASH, "-1.272 Fib : " + DoubleToString(mid - (dist * 1.272), _Digits));
+         DrawLine(g_prefix+"FIB_L_1.618", eTime, fibEndTime, mid - (dist * 1.618), ColorFibo, 1, STYLE_DASH, "-1.618 Fib : " + DoubleToString(mid - (dist * 1.618), _Digits));
+         DrawLine(g_prefix+"FIB_L_2.000", eTime, fibEndTime, mid - (dist * 2.000), ColorFibo, 1, STYLE_DASH, "-2.000 Fib : " + DoubleToString(mid - (dist * 2.000), _Digits));
+         DrawLine(g_prefix+"FIB_L_2.618", eTime, fibEndTime, mid - (dist * 2.618), ColorFibo, 1, STYLE_DASH, "-2.618 Fib : " + DoubleToString(mid - (dist * 2.618), _Digits));
+         DrawLine(g_prefix+"FIB_L_3.618", eTime, fibEndTime, mid - (dist * 3.618), ColorFibo, 1, STYLE_DASH, "-3.618 Fib : " + DoubleToString(mid - (dist * 3.618), _Digits));
+         DrawLine(g_prefix+"FIB_L_4.236", eTime, fibEndTime, mid - (dist * 4.236), ColorFibo, 1, STYLE_DASH, "-4.236 Fib : " + DoubleToString(mid - (dist * 4.236), _Digits));
+         DrawLine(g_prefix+"FIB_L_5.000", eTime, fibEndTime, mid - (dist * 5.000), ColorFibo, 1, STYLE_DASH, "-5.000 Fib : " + DoubleToString(mid - (dist * 5.000), _Digits));
       }
    }
    return(rates_total);
@@ -120,9 +120,9 @@ void DrawLine(string name, datetime t1, datetime t2, double p, color c, int w, E
    ObjectSetInteger(0, name, OBJPROP_STYLE, s);
    ObjectSetInteger(0, name, OBJPROP_RAY_RIGHT, false);
    
-   // Affiche la description dans la liste des objets et sur le graphique
+   // Affiche la description dans la liste des objets et sur le graphique (si "Montrer description" est coché)
    ObjectSetString(0, name, OBJPROP_TEXT, desc);
    
-   // CORRECTION ICI : Utilisation de ObjectSetString pour l'infobulle (Tooltip)
+   // Affiche l'infobulle au survol de la souris avec le texte dynamique (niveau + prix)
    ObjectSetString(0, name, OBJPROP_TOOLTIP, desc);
 }
