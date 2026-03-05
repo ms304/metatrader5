@@ -13,35 +13,36 @@ input bool     ShowHTF        = true;
 input color    ColorPDH_PDL   = clrRed;
 input color    ColorPWH_PWL   = clrGold;
 
-input group "Extensions Fibonacci"
-input color    ColorFibo      = clrGray; 
-input bool     ShowFibo       = true;    
+input group "Fibo Internes (OTE - Expérimental)"
+input bool     ShowFiboInt    = true;
+input color    ColorFiboInt   = clrMediumPurple;
+
+input group "Extensions Fibonacci (Externes)"
+input bool     ShowFiboExt    = true;
+input color    ColorFiboExt   = clrGray; 
 
 //--- GLOBALS
-string g_prefix = "Asian_";
+string g_prefix = "Asian_Full_";
 
 //+------------------------------------------------------------------+
 //| OnCalculate                                                      |
 //+------------------------------------------------------------------+
 int OnCalculate(const int rates_total, const int prev_calculated, const int begin, const double &price[])
 {
-   // On utilise l'heure du dernier bar connu
    datetime lastBarTime = iTime(_Symbol, _Period, 0);
    MqlDateTime dt; 
    TimeToStruct(lastBarTime, dt);
    
-   // Calcul du temps pour minuit (fin de la journée actuelle)
+   // Calcul de la fin de journée (Midnight)
    dt.hour = 23; dt.min = 59; dt.sec = 59;
    datetime midnightTime = StructToTime(dt);
    
-   // Construction des dates de début et de fin de session
+   // Définition de la session
    dt.hour = StartHour; dt.min = 0; dt.sec = 0;
    datetime sTime = StructToTime(dt);
-   
    dt.hour = EndHour;
    datetime eTime = StructToTime(dt);
 
-   // Récupération des barres de la session
    int startBar = GetBarShift(_Symbol, _Period, sTime);
    int endBar   = GetBarShift(_Symbol, _Period, eTime);
    int count = startBar - endBar;
@@ -52,44 +53,42 @@ int OnCalculate(const int rates_total, const int prev_calculated, const int begi
       double mid = (h + l) / 2.0;
       double dist = h - mid; 
 
-      // 1. Dessin des lignes Session (prolongées jusqu'à minuit)
+      // 1. Dessin de la Box Session
       DrawBox(g_prefix+"RECT", sTime, eTime, h, l);
-      DrawLine(g_prefix+"HIGH", sTime, midnightTime, h, ColorHighLow, 2, STYLE_SOLID, "Asian High : " + DoubleToString(h, _Digits));
-      DrawLine(g_prefix+"LOW", sTime, midnightTime, l, ColorHighLow, 2, STYLE_SOLID, "Asian Low : " + DoubleToString(l, _Digits));
-      DrawLine(g_prefix+"MID", sTime, midnightTime, mid, clrOrange, 1, STYLE_DOT, "Equilibrium : " + DoubleToString(mid, _Digits));
+      
+      // 2. Lignes de base prolongées
+      DrawLine(g_prefix+"HIGH", sTime, midnightTime, h, ColorHighLow, 2, STYLE_SOLID, "AH");
+      DrawLine(g_prefix+"LOW", sTime, midnightTime, l, ColorHighLow, 2, STYLE_SOLID, "AL");
+      DrawLine(g_prefix+"MID", sTime, midnightTime, mid, clrOrange, 1, STYLE_DOT, "AM (Equilibrium)");
 
-      // 2. Niveaux HTF (PDH, PDL, PWH, PWL)
+      // 3. Niveaux HTF (Daily / Weekly)
       if(ShowHTF) {
          double pdh = iHigh(_Symbol, PERIOD_D1, 1);
          double pdl = iLow(_Symbol, PERIOD_D1, 1);
          double pwh = iHigh(_Symbol, PERIOD_W1, 1);
          double pwl = iLow(_Symbol, PERIOD_W1, 1);
-
-         DrawLine(g_prefix+"PDH", sTime, midnightTime, pdh, ColorPDH_PDL, 1, STYLE_DASH, "PDH : " + DoubleToString(pdh, _Digits));
-         DrawLine(g_prefix+"PDL", sTime, midnightTime, pdl, ColorPDH_PDL, 1, STYLE_DASH, "PDL : " + DoubleToString(pdl, _Digits));
-         DrawLine(g_prefix+"PWH", sTime, midnightTime, pwh, ColorPWH_PWL, 1, STYLE_DASH, "PWH : " + DoubleToString(pwh, _Digits));
-         DrawLine(g_prefix+"PWL", sTime, midnightTime, pwl, ColorPWH_PWL, 1, STYLE_DASH, "PWL : " + DoubleToString(pwl, _Digits));
+         DrawLine(g_prefix+"PDH", sTime, midnightTime, pdh, ColorPDH_PDL, 1, STYLE_DASH, "PDH");
+         DrawLine(g_prefix+"PDL", sTime, midnightTime, pdl, ColorPDH_PDL, 1, STYLE_DASH, "PDL");
+         DrawLine(g_prefix+"PWH", sTime, midnightTime, pwh, ColorPWH_PWL, 1, STYLE_DASH, "PWH");
+         DrawLine(g_prefix+"PWL", sTime, midnightTime, pwl, ColorPWH_PWL, 1, STYLE_DASH, "PWL");
       }
 
-      // 3. Extensions Fibonacci
-      if(ShowFibo) {
-         DrawLine(g_prefix+"FIB_H_0.618", eTime, midnightTime, mid + (dist * 0.618), ColorFibo, 1, STYLE_DASH, "+0.618 Fib");
-         DrawLine(g_prefix+"FIB_H_1.272", eTime, midnightTime, mid + (dist * 1.272), ColorFibo, 1, STYLE_DASH, "+1.272 Fib");
-         DrawLine(g_prefix+"FIB_H_1.618", eTime, midnightTime, mid + (dist * 1.618), ColorFibo, 1, STYLE_DASH, "+1.618 Fib");
-         DrawLine(g_prefix+"FIB_H_2.000", eTime, midnightTime, mid + (dist * 2.000), ColorFibo, 1, STYLE_DASH, "+2.000 Fib");
-         DrawLine(g_prefix+"FIB_H_2.618", eTime, midnightTime, mid + (dist * 2.618), ColorFibo, 1, STYLE_DASH, "+2.618 Fib");
-         DrawLine(g_prefix+"FIB_H_3.618", eTime, midnightTime, mid + (dist * 3.618), ColorFibo, 1, STYLE_DASH, "+3.618 Fib");
-         DrawLine(g_prefix+"FIB_H_4.236", eTime, midnightTime, mid + (dist * 4.236), ColorFibo, 1, STYLE_DASH, "+4.236 Fib");
-         DrawLine(g_prefix+"FIB_H_5.000", eTime, midnightTime, mid + (dist * 5.000), ColorFibo, 1, STYLE_DASH, "+5.000 Fib");
-         
-         DrawLine(g_prefix+"FIB_L_0.618", eTime, midnightTime, mid - (dist * 0.618), ColorFibo, 1, STYLE_DASH, "-0.618 Fib");
-         DrawLine(g_prefix+"FIB_L_1.272", eTime, midnightTime, mid - (dist * 1.272), ColorFibo, 1, STYLE_DASH, "-1.272 Fib");
-         DrawLine(g_prefix+"FIB_L_1.618", eTime, midnightTime, mid - (dist * 1.618), ColorFibo, 1, STYLE_DASH, "-1.618 Fib");
-         DrawLine(g_prefix+"FIB_L_2.000", eTime, midnightTime, mid - (dist * 2.000), ColorFibo, 1, STYLE_DASH, "-2.000 Fib");
-         DrawLine(g_prefix+"FIB_L_2.618", eTime, midnightTime, mid - (dist * 2.618), ColorFibo, 1, STYLE_DASH, "-2.618 Fib");
-         DrawLine(g_prefix+"FIB_L_3.618", eTime, midnightTime, mid - (dist * 3.618), ColorFibo, 1, STYLE_DASH, "-3.618 Fib");
-         DrawLine(g_prefix+"FIB_L_4.236", eTime, midnightTime, mid - (dist * 4.236), ColorFibo, 1, STYLE_DASH, "-4.236 Fib");
-         DrawLine(g_prefix+"FIB_L_5.000", eTime, midnightTime, mid - (dist * 5.000), ColorFibo, 1, STYLE_DASH, "-5.000 Fib");
+      // 4. FIBO INTERNES (OTE) prolongés
+      if(ShowFiboInt) {
+         double intLev[] = {0.618, 0.705, 0.786};
+         for(int j=0; j<3; j++) {
+            DrawLine(g_prefix+"OTE_H"+(string)j, sTime, midnightTime, mid+(dist*intLev[j]), ColorFiboInt, 1, STYLE_DOT, "");
+            DrawLine(g_prefix+"OTE_L"+(string)j, sTime, midnightTime, mid-(dist*intLev[j]), ColorFiboInt, 1, STYLE_DOT, "");
+         }
+      }
+
+      // 5. EXTENSIONS EXTERNES prolongées
+      if(ShowFiboExt) {
+         double extLev[] = {0.618, 1.272, 1.618, 2.0, 2.618, 3.618, 4.236, 5.0};
+         for(int k=0; k<ArraySize(extLev); k++) {
+            DrawLine(g_prefix+"EXT_H"+(string)k, eTime, midnightTime, mid+(dist*extLev[k]), ColorFiboExt, 1, STYLE_DASH, "");
+            DrawLine(g_prefix+"EXT_L"+(string)k, eTime, midnightTime, mid-(dist*extLev[k]), ColorFiboExt, 1, STYLE_DASH, "");
+         }
       }
    }
    return(rates_total);
@@ -136,5 +135,4 @@ void DrawLine(string name, datetime t1, datetime t2, double p, color c, int w, E
    ObjectSetInteger(0, name, OBJPROP_STYLE, s);
    ObjectSetInteger(0, name, OBJPROP_RAY_RIGHT, false);
    ObjectSetString(0, name, OBJPROP_TEXT, desc);
-   ObjectSetString(0, name, OBJPROP_TOOLTIP, desc);
 }
