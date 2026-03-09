@@ -1,0 +1,132 @@
+//@version=5
+indicator("Asia Session + Fibs (Full Display Fix)", overlay=true, max_lines_count=500, max_labels_count=500)
+
+// --- INPUTS ---
+tradeRange = input.session("1800-0200", "Session Hours")
+c_lines = input.color(color.orange, "Couleur des lignes/texte")
+s_lines = line.style_dashed 
+w_lines = input.int(1, "Épaisseur")
+bg_color = input.color(color.new(color.orange, 90), "Fond de la session")
+
+show_labels = input.bool(true, "Afficher le texte")
+label_offset = input.int(10, "Décalage texte Session/Fibs") 
+label_offset_htf = input.int(30, "Décalage texte HTF (PDH, PWH...)")
+
+// --- VARIABLES ---
+var float sHigh = na
+var float sLow = na
+var int sStart = na
+var box b_session = na
+
+// Lignes & Labels Session
+var line l_ah = na, var line l_am = na, var line l_al = na
+var line l_up1 = na, var line l_up2 = na, var line l_up3 = na, var line l_up4 = na, var line l_up5 = na
+var line l_dn1 = na, var line l_dn2 = na, var line l_dn3 = na, var line l_dn4 = na, var line l_dn5 = na
+
+var label lbl_ah = na, var label lbl_am = na, var label lbl_al = na
+var label lbl_up1 = na, var label lbl_up2 = na, var label lbl_up3 = na, var label lbl_up4 = na, var label lbl_up5 = na
+var label lbl_dn1 = na, var label lbl_dn2 = na, var label lbl_dn3 = na, var label lbl_dn4 = na, var label lbl_dn5 = na
+
+// Lignes & Labels HTF
+var line l_pdh = na, var line l_pdl = na, var line l_pwh = na, var line l_pwl = na
+var label lbl_pdh = na, var label lbl_pdl = na, var label lbl_pwh = na, var label lbl_pwl = na
+
+// --- LOGIQUE DE TEMPS ---
+inSession = not na(time(timeframe.period, tradeRange))
+sessionStart = inSession and not inSession[1]
+sessionEnd = not inSession and inSession[1]
+
+// Récupération des données HTF
+[pdh, pdl] = request.security(syminfo.tickerid, "1D", [high[1], low[1]], lookahead=barmerge.lookahead_on)
+[pwh, pwl] = request.security(syminfo.tickerid, "1W", [high[1], low[1]], lookahead=barmerge.lookahead_on)
+
+// --- FONCTIONS DE DESSIN ---
+delete_session_lines() =>
+    line.delete(l_ah), line.delete(l_am), line.delete(l_al)
+    line.delete(l_up1), line.delete(l_up2), line.delete(l_up3), line.delete(l_up4), line.delete(l_up5)
+    line.delete(l_dn1), line.delete(l_dn2), line.delete(l_dn3), line.delete(l_dn4), line.delete(l_dn5)
+    label.delete(lbl_ah), label.delete(lbl_am), label.delete(lbl_al)
+    label.delete(lbl_up1), label.delete(lbl_up2), label.delete(lbl_up3), label.delete(lbl_up4), label.delete(lbl_up5)
+    label.delete(lbl_dn1), label.delete(lbl_dn2), label.delete(lbl_dn3), label.delete(lbl_dn4), label.delete(lbl_dn5)
+
+draw_inf_line(y, style) => 
+    not na(y) ? line.new(time, y, time + 1000, y, xloc.bar_time, extend.right, c_lines, style, w_lines) : na
+
+create_lbl(y, txt, offset) =>
+    show_labels and not na(y) ? label.new(bar_index + offset, y, txt + " : " + str.tostring(y, format.mintick), xloc.bar_index, yloc.price, color.new(color.black, 100), label.style_none, c_lines, size.normal, text.align_left) : na
+
+// --- LOGIQUE PRINCIPALE ---
+
+// 1. DÉBUT DE SESSION : Nettoyage
+if sessionStart
+    sHigh := high
+    sLow := low
+    sStart := time
+    box.delete(b_session)
+    delete_session_lines()
+
+// 2. PENDANT LA SESSION : Mise à jour des bornes
+if inSession
+    sHigh := math.max(sHigh, high)
+    sLow := math.min(sLow, low)
+
+// 3. TRACÉ (Se déclenche dès qu'on a des données, et se fige à sessionEnd)
+if not na(sHigh) and not na(sLow)
+    // Calculs
+    mid = (sHigh + sLow) / 2
+    dist_up = sHigh - mid
+    dist_dn = mid - sLow
+
+    // On rafraîchit les lignes à chaque bougie pour qu'elles restent présentes
+    delete_session_lines()
+    
+    // Box de fond
+    if na(b_session) or sessionStart or inSession
+        box.delete(b_session)
+        b_session := box.new(sStart, sHigh, inSession ? time : time[1], sLow, color.new(color.white,100), 0, line.style_solid, extend.none, xloc.bar_time, bg_color)
+
+    // Lignes AH, AM, AL
+    l_ah := draw_inf_line(sHigh, line.style_solid)
+    l_am := draw_inf_line(mid, line.style_dotted)
+    l_al := draw_inf_line(sLow, line.style_solid)
+    
+    lbl_ah := create_lbl(sHigh, "AH", label_offset)
+    lbl_am := create_lbl(mid, "AM", label_offset)
+    lbl_al := create_lbl(sLow, "AL", label_offset)
+
+    // Fibs
+    l_up1 := draw_inf_line(mid + (dist_up * 1.618), s_lines), l_up2 := draw_inf_line(mid + (dist_up * 2.618), s_lines), l_up3 := draw_inf_line(mid + (dist_up * 3.618), s_lines), l_up4 := draw_inf_line(mid + (dist_up * 4.618), s_lines), l_up5 := draw_inf_line(mid + (dist_up * 5.618), s_lines)
+    l_dn1 := draw_inf_line(mid - (dist_dn * 1.618), s_lines), l_dn2 := draw_inf_line(mid - (dist_dn * 2.618), s_lines), l_dn3 := draw_inf_line(mid - (dist_dn * 3.618), s_lines), l_dn4 := draw_inf_line(mid - (dist_dn * 4.618), s_lines), l_dn5 := draw_inf_line(mid - (dist_dn * 5.618), s_lines)
+
+    lbl_up1 := create_lbl(mid + (dist_up * 1.618), "Fib +1.618", label_offset), lbl_up2 := create_lbl(mid + (dist_up * 2.618), "Fib +2.618", label_offset), lbl_up3 := create_lbl(mid + (dist_up * 3.618), "Fib +3.618", label_offset), lbl_up4 := create_lbl(mid + (dist_up * 4.618), "Fib +4.618", label_offset), lbl_up5 := create_lbl(mid + (dist_up * 5.618), "Fib +5.618", label_offset)
+    lbl_dn1 := create_lbl(mid - (dist_dn * 1.618), "Fib -1.618", label_offset), lbl_dn2 := create_lbl(mid - (dist_dn * 2.618), "Fib -2.618", label_offset), lbl_dn3 := create_lbl(mid - (dist_dn * 3.618), "Fib -3.618", label_offset), lbl_dn4 := create_lbl(mid - (dist_dn * 4.618), "Fib -4.618", label_offset), lbl_dn5 := create_lbl(mid - (dist_dn * 5.618), "Fib -5.618", label_offset)
+
+// --- GESTION HTF (PDH, PDL, PWH, PWL) ---
+var int last_day = 0
+if dayofmonth != last_day
+    line.delete(l_pdh), line.delete(l_pdl), line.delete(l_pwh), line.delete(l_pwl)
+    label.delete(lbl_pdh), label.delete(lbl_pdl), label.delete(lbl_pwh), label.delete(lbl_pwl)
+    
+    txt_pdh = (pdh == pwh) ? "PDH / PWH" : "PDH"
+    txt_pdl = (pdl == pwl) ? "PDL / PWL" : "PDL"
+    
+    l_pdh := line.new(time, pdh, time + 1000, pdh, xloc.bar_time, extend.right, color.red, line.style_dotted, 1)
+    l_pdl := line.new(time, pdl, time + 1000, pdl, xloc.bar_time, extend.right, color.red, line.style_dotted, 1)
+    lbl_pdh := label.new(bar_index + label_offset_htf, pdh, txt_pdh + " : " + str.tostring(pdh, format.mintick), style=label.style_none, textcolor=color.red)
+    lbl_pdl := label.new(bar_index + label_offset_htf, pdl, txt_pdl + " : " + str.tostring(pdl, format.mintick), style=label.style_none, textcolor=color.red)
+    
+    if pwh != pdh
+        l_pwh := line.new(time, pwh, time + 1000, pwh, xloc.bar_time, extend.right, color.yellow, line.style_dotted, 1)
+        lbl_pwh := label.new(bar_index + label_offset_htf, pwh, "PWH : " + str.tostring(pwh, format.mintick), style=label.style_none, textcolor=color.yellow)
+    if pwl != pdl
+        l_pwl := line.new(time, pwl, time + 1000, pwl, xloc.bar_time, extend.right, color.yellow, line.style_dotted, 1)
+        lbl_pwl := label.new(bar_index + label_offset_htf, pwl, "PWL : " + str.tostring(pwl, format.mintick), style=label.style_none, textcolor=color.yellow)
+    last_day := dayofmonth
+
+// --- MISE À JOUR TEMPS RÉEL DES LABELS (Sticky Labels) ---
+if barstate.islast
+    label.set_x(lbl_ah, bar_index + label_offset), label.set_x(lbl_am, bar_index + label_offset), label.set_x(lbl_al, bar_index + label_offset)
+    label.set_x(lbl_up1, bar_index + label_offset), label.set_x(lbl_up2, bar_index + label_offset), label.set_x(lbl_up3, bar_index + label_offset), label.set_x(lbl_up4, bar_index + label_offset), label.set_x(lbl_up5, bar_index + label_offset)
+    label.set_x(lbl_dn1, bar_index + label_offset), label.set_x(lbl_dn2, bar_index + label_offset), label.set_x(lbl_dn3, bar_index + label_offset), label.set_x(lbl_dn4, bar_index + label_offset), label.set_x(lbl_dn5, bar_index + label_offset)
+    label.set_x(lbl_pdh, bar_index + label_offset_htf), label.set_x(lbl_pdl, bar_index + label_offset_htf)
+    label.set_x(lbl_pwh, bar_index + label_offset_htf), label.set_x(lbl_pwl, bar_index + label_offset_htf)
