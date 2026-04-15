@@ -1,3 +1,24 @@
+
+
+
+Oui, c'est tout à fait possible ! Pine Script (le langage de TradingView) est très bien adapté pour repérer ce genre de séquence chronologique.
+
+Puisque vous avez défini des règles mécaniques très claires (SSL préexistant → Création BSL → Sweep SSL → Pullback/MSS → Target BSL), j'ai codé pour vous un **indicateur sur-mesure (SMC/ICT Turtle Soup)**.
+
+### ⚙️ Comment fonctionne ce script :
+1. **Identification du SSL (Ligne Rouge) :** Il repère un vrai "Swing Low" (plus bas).
+2. **Identification du BSL (Ligne Bleue) :** Il repère un "Swing High" (plus haut) qui se forme **strictement après** le SSL. On a donc notre "SSL préexistant".
+3. **Le Sweep (Label 🧹) :** Dès que le prix casse en dessous du SSL préexistant, il marque la zone. L'algorithme est en train de chasser les stops.
+4. **Le Pullback / MSS (Label 🚀 ENTRY) :** Une fois le Sweep effectué, le script attend un signal de retournement haussier (Un Fair Value Gap haussier validé ou une cassure de la structure locale). Dès que c'est validé, il vous donne le signal d'entrée.
+
+### 📝 Le Code Pine Script (v5) à copier-coller
+
+1. Allez sur TradingView.
+2. En bas de l'écran, cliquez sur l'onglet **"Éditeur Pine"** (Pine Editor).
+3. Effacez tout le code présent, et **collez le code ci-dessous**.
+4. Cliquez sur **"Ajouter au graphique"** (Add to chart).
+
+```pine
 //@version=5
 indicator("ICT AMD / BSL-SSL Sweep [Sur-mesure]", overlay=true, max_lines_count=50, max_labels_count=50)
 
@@ -72,3 +93,17 @@ if pullback_valid
 
 // Alertes
 alertcondition(pullback_valid, title="ICT Pullback Validé !", message="Le prix a sweepé le SSL pré-existant et validé un Pullback. Target : BSL.")
+```
+
+### 💡 Comment lire l'indicateur sur votre graphique :
+
+1. **Ligne pointillée ROUGE :** C'est votre "SSL préexistant". L'algorithme a repéré un vrai creux.
+2. **Ligne pleine BLEUE :** C'est votre "BSL". L'algorithme a repéré que les *Smart Money* viennent de créer un sommet pour attirer les acheteurs (Inducement).
+3. **Label "🧹 SWEEP" :** Apparaît en direct à la seconde où le prix passe sous la ligne rouge. Le piège se referme sur les acheteurs hâtifs.
+4. **Label "🚀 ENTRY / Target BSL" :** Apparaît dès que le pullback est validé. Par défaut, il exige un FVG (Fair Value Gap) haussier pour éviter d'entrer trop tôt pendant une simple chute. Une ligne pointillée verte trace visuellement le chemin vers le BSL (votre Take Profit).
+
+### 🛠️ Ajustements possibles (Dans les paramètres de l'indicateur) :
+*   **Pivot Left / Pivot Right :** Par défaut à 15 et 5. Plus les chiffres sont grands, plus l'indicateur cherchera des BSL/SSL majeurs (D1, H4). Plus ils sont petits, plus il réagira vite (M5, M15). Pour votre style, 15/5 est un excellent compromis sur du M5.
+*   **Exiger un FVG :** Si vous décochez cette case, l'indicateur déclenchera le signal "ENTRY" dès que le prix clôturera au-dessus de la dernière bougie baissière (Market Structure Shift simple). C'est plus agressif.
+
+Vous pouvez tester ce script sur vos 8 cycles victorieux, il devrait poser les étiquettes exactement là où vous avez identifié vos trades d'école ! Vous pourrez même y **ajouter une alerte** via TradingView pour être notifié sur votre téléphone quand ce setup précis se produit.
