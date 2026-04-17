@@ -4,7 +4,7 @@
 #property strict
 #property version "4.06"
 
-input string API_KEY = "AIzaSyAwK3-J49g75rK6mfYskVuZoJbdrjbSKgs";
+input string API_KEY = "";
 
 
 input int IntervalMin = 5;
