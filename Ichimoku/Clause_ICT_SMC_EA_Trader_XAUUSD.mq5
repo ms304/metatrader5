@@ -5,7 +5,7 @@
 //|          Version 1.00  –  Compatible tout actif                  |
 //+------------------------------------------------------------------+
 #property version   "1.00"
-#property copyright "ICT SMC EA"
+#property copyright "ICT SMC EA - 2026 - solanaexpert AT protonmail.com - investdatasystems AT yahoo.com"
 #property strict
 
 #include <Trade/Trade.mqh>
