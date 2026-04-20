@@ -24,7 +24,7 @@ Le calcul des lots utilise `tickSize` et `tickValue` pour être précis sur tout
 
 -----
 
-## Risques de ne PAS modifier ces paramètres pour l'or (XAUUSD)
+## Ajustement des paramètres pour l'or (XAUUSD)
 
 ### **SwingLookback (défaut implicite 10 bougies)**
 
