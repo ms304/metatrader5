@@ -1,22 +1,21 @@
 //+------------------------------------------------------------------+
 //|   BSL / SSL SWEEP SCANNER — MULTI-ACTIFS MARKETWATCH            |
-//|   Pattern : Sweep BSL → Sweep SSL → Alerte LONG vers BSL        |
-//|   Version 1.10                                                   |
+//|   Pattern : Sweep BSL → Sweep SSL → prix repasse au-dessus SSL  |
+//|   Version 1.20                                                   |
 //+------------------------------------------------------------------+
 //
 //  LOGIQUE DU PATTERN RECHERCHÉ
 //  ─────────────────────────────────────────────────────────────────
-//  1) Le prix monte et SWEEPE un swing high (Buy Side Liquidity = BSL)
+//  1) Le prix monte et SWEEPE un swing high (BSL)
 //     → bougie qui dépasse le swing high mais CLÔTURE EN DESSOUS
-//  2) Ensuite, le prix descend et SWEEPE un swing low (Sell Side
-//     Liquidity = SSL) formé AVANT le sweep BSL
+//  2) Le prix descend et SWEEPE un swing low (SSL) formé avant le BSL
 //     → bougie qui dépasse le swing low mais CLÔTURE AU-DESSUS
-//  3) Cette double séquence = signal LONG pour aller récupérer le BSL
-//     initialement sweepé (cible = niveau du BSL sweepé)
+//  3) CONFIRMATION : le prix repasse AU-DESSUS du niveau SSL sweepé
+//     C'est à ce moment que l'alerte est émise.
+//     Cible = BSL initialement sweepé.
 //  ─────────────────────────────────────────────────────────────────
 //  Attacher l'EA sur le timeframe voulu (H1, M15, M5...).
 //  Il scanne TOUS les actifs du MarketWatch sur CE timeframe.
-//  Changer de graphique = changer le timeframe de scan.
 //+------------------------------------------------------------------+
 
 #property version   "1.00"
@@ -65,17 +64,20 @@ struct SwingLow
 struct PatternSignal
   {
    string   symbol;
-   datetime signalTime;
+   datetime signalTime;       // Heure du sweep SSL
    double   bslLevel;         // Prix du swing high (BSL)
    datetime bslCandleTime;    // Heure de la bougie du swing high (BSL formé)
    datetime bslSweepTime;     // Heure de la bougie qui a sweepé le BSL
    double   sslLevel;         // Prix du swing low (SSL)
    datetime sslCandleTime;    // Heure de la bougie du swing low (SSL formé)
-   datetime sslSweepTime;     // Heure de la bougie qui a sweepé le SSL (= signalTime)
+   datetime sslSweepTime;     // Heure de la bougie qui a sweepé le SSL
+   datetime confirmTime;      // Heure à laquelle le prix a repassé au-dessus du SSL
+   double   confirmPrice;     // Prix de confirmation (bid au moment du repassage)
    double   entryZoneHigh;    // Zone d'entrée haute
    double   entryZoneLow;     // Zone d'entrée basse (SL)
    int      barsSinceSignal;
-   bool     alerted;
+   bool     confirmed;        // true = prix repassé au-dessus du SSL → alerte envoyée
+   bool     alerted;          // true = alerte déjà émise
   };
 
 //+------------------------------------------------------------------+
@@ -287,76 +289,58 @@ void AnalyzeSymbol(string sym)
         }
      }
 
-   // ── Étape 3 : Pour chaque BSL sweepé, chercher le sweep SSL ──
+   // ── Étape 3 : Pour chaque BSL sweepé, chercher TOUS les sweeps SSL ──
    //
-   // Conditions strictes :
-   //  a) Le swing low (SSL candidat) doit être ANTÉRIEUR au sweep BSL
-   //     → son barIndex > B1  (plus grand index = plus ancien)
-   //  b) Le SSL doit aussi être ANTÉRIEUR au swing high lui-même
-   //     → son barIndex > bslBar  n'est pas obligatoire mais
-   //        il doit exister AVANT le sweep BSL, donc barIndex > b1
-   //  c) Une bougie B2, avec b1 > B2 >= 1 (après le sweep BSL, donc
-   //     plus récente que B1), doit sweeper ce SSL :
-   //       low[B2] < sslPrice  ET  close[B2] > sslPrice
-   //  d) Move baissier entre B1 et B2 : le prix doit effectivement
-   //     descendre depuis le sweep BSL jusqu'au SSL
-   //  e) B2 doit être récent (index ≤ SignalExpiryBars)
+   // Un même BSL sweepé peut donner lieu à plusieurs signaux si le prix
+   // continue de descendre et sweepé des SSL de plus en plus bas.
+   // Chaque nouveau SSL sweepé (plus bas que le précédent) génère une
+   // nouvelle alerte indépendante.
+   //
+   // Pour chaque BSL sweepé :
+   //   → on itère sur TOUS les swing lows antérieurs au sweep BSL (SSL candidats)
+   //   → pour chacun, on cherche la bougie de sweep APRÈS le sweep BSL
+   //   → si trouvé et non déjà alerté → nouveau signal
 
    for(int hi = 0; hi < nhCount; hi++)
      {
       if(!swingHighs[hi].swept) continue;
 
-      int    b1       = swingHighs[hi].sweepBar; // bar du sweep BSL
+      int    b1       = swingHighs[hi].sweepBar;
       double bslPrice = swingHighs[hi].price;
+      int    searchLimit = MathMax(1, b1 - MaxBarsAfterBSLSweep);
 
-      // Chercher le swing low candidat (SSL) :
-      // Il doit avoir été formé AVANT le sweep BSL → barIndex > b1
-      // On prend le SSL le plus récent qui satisfait cette condition
-      int    sslBar   = -1;
-      double sslPrice = 0;
-
+      // Itérer sur tous les SSL candidats (swing lows antérieurs au sweep BSL)
+      // nlCount est trié du plus récent au plus ancien (index croissant = plus ancien)
       for(int li = 0; li < nlCount; li++)
         {
-         if(swingLows[li].barIndex > b1) // plus ancien que le sweep BSL ✓
+         // Le swing low doit avoir été formé AVANT le sweep BSL
+         if(swingLows[li].barIndex <= b1) continue;
+
+         int    sslBar   = swingLows[li].barIndex;
+         double sslPrice = swingLows[li].price;
+
+         // Cohérence : le SSL doit être sous le BSL
+         if(sslPrice >= bslPrice) continue;
+
+         // Chercher la bougie qui sweepé CE SSL, après le sweep BSL
+         for(int b2 = b1 - 1; b2 >= searchLimit; b2--)
            {
-            sslBar   = swingLows[li].barIndex;
-            sslPrice = swingLows[li].price;
-            break; // premier trouvé = le plus récent parmi les candidats
-           }
-        }
-
-      if(sslBar < 0) continue; // aucun swing low antérieur au sweep BSL
-
-      // Le SSL doit être sous le BSL (logique : on a sweepé un haut,
-      // puis on redescend chercher un bas)
-      if(sslPrice >= bslPrice) continue;
-
-      // Chercher le sweep du SSL sur les bougies ENTRE b1 et bar 0
-      // (bougies plus récentes que le sweep BSL, index < b1)
-      // On cherche aussi uniquement dans la fenêtre MaxBarsAfterBSLSweep
-      int searchLimit = MathMax(1, b1 - MaxBarsAfterBSLSweep);
-
-      for(int b2 = b1 - 1; b2 >= searchLimit; b2--)
-        {
-         if(r[b2].low < sslPrice)
-           {
-            if(r[b2].close > sslPrice)
+            if(r[b2].low < sslPrice)
               {
-               // ✓ Sweep SSL confirmé à la bougie b2
+               // Cassure franche (clôture sous le SSL) → ce SSL est invalidé,
+               // mais on continue vers le SSL suivant (plus bas) car le prix
+               // a peut-être ensuite sweepé un SSL encore plus bas
+               if(r[b2].close <= sslPrice) break;
 
-               // Vérifier fraîcheur du signal
+               // ✓ Sweep SSL confirmé : wick sous le SSL, clôture au-dessus
+
+               // Vérifier fraîcheur
                if(HighlightOnlyFresh && b2 > SignalExpiryBars) break;
 
-               // Vérifier move baissier entre b1 et b2 :
-               // le low entre b1 et b2 doit être descendu sous le SSL
-               // (déjà garanti par r[b2].low < sslPrice)
-               // Confirmation supplémentaire : le close de b1 doit être
-               // supérieur au close de b2 (direction baissière du move)
+               // Vérifier direction baissière entre sweep BSL et sweep SSL
                if(r[b1].close <= r[b2].close) break;
 
-               // ── Signal valide ──
-
-               // Déjà alerté ?
+               // Déjà alerté sur cette bougie de sweep ?
                bool alreadyAlerted = false;
                for(int s = 0; s < g_alertedCount; s++)
                  {
@@ -364,36 +348,39 @@ void AnalyzeSymbol(string sym)
                      g_alertedTimes[s]   == r[b2].time)
                     { alreadyAlerted = true; break; }
                  }
-               if(alreadyAlerted) break;
 
-               // Créer le signal
-               ArrayResize(g_signals, g_signalCount + 1);
-               g_signals[g_signalCount].symbol         = sym;
-               g_signals[g_signalCount].signalTime     = r[b2].time;
-               g_signals[g_signalCount].bslLevel       = bslPrice;
-               g_signals[g_signalCount].bslCandleTime  = r[swingHighs[hi].barIndex].time;
-               g_signals[g_signalCount].bslSweepTime   = r[b1].time;
-               g_signals[g_signalCount].sslLevel       = sslPrice;
-               g_signals[g_signalCount].sslCandleTime  = r[sslBar].time;
-               g_signals[g_signalCount].sslSweepTime   = r[b2].time;
-               g_signals[g_signalCount].entryZoneHigh  = r[b2].close;
-               g_signals[g_signalCount].entryZoneLow   = sslPrice - (5 * symPoint);
-               g_signals[g_signalCount].barsSinceSignal= b2;
-               g_signals[g_signalCount].alerted        = false;
-               g_signalCount++;
+               if(!alreadyAlerted)
+                 {
+                  // Créer le signal
+                  ArrayResize(g_signals, g_signalCount + 1);
+                  g_signals[g_signalCount].symbol         = sym;
+                  g_signals[g_signalCount].signalTime     = r[b2].time;
+                  g_signals[g_signalCount].bslLevel       = bslPrice;
+                  g_signals[g_signalCount].bslCandleTime  = r[swingHighs[hi].barIndex].time;
+                  g_signals[g_signalCount].bslSweepTime   = r[b1].time;
+                  g_signals[g_signalCount].sslLevel       = sslPrice;
+                  g_signals[g_signalCount].sslCandleTime  = r[sslBar].time;
+                  g_signals[g_signalCount].sslSweepTime   = r[b2].time;
+                  g_signals[g_signalCount].entryZoneHigh  = r[b2].close;
+                  g_signals[g_signalCount].entryZoneLow   = sslPrice - (5 * symPoint);
+                  g_signals[g_signalCount].barsSinceSignal= b2;
+                  g_signals[g_signalCount].alerted        = false;
+                  g_signalCount++;
 
-               // Enregistrer dans l'historique permanent
-               ArrayResize(g_alertedSymbols, g_alertedCount + 1);
-               ArrayResize(g_alertedTimes,   g_alertedCount + 1);
-               g_alertedSymbols[g_alertedCount] = sym;
-               g_alertedTimes[g_alertedCount]   = r[b2].time;
-               g_alertedCount++;
+                  // Enregistrer dans l'historique permanent
+                  ArrayResize(g_alertedSymbols, g_alertedCount + 1);
+                  ArrayResize(g_alertedTimes,   g_alertedCount + 1);
+                  g_alertedSymbols[g_alertedCount] = sym;
+                  g_alertedTimes[g_alertedCount]   = r[b2].time;
+                  g_alertedCount++;
 
-               // Envoyer l'alerte
-               SendSignalAlert(g_signals[g_signalCount - 1], symPoint);
+                  SendSignalAlert(g_signals[g_signalCount - 1], symPoint);
+                 }
+
+               // Ce SSL a été traité (sweep trouvé), passer au SSL suivant
+               // (plus bas) pour détecter un éventuel deuxième sweep
+               break;
               }
-            // Que ce soit sweep ou cassure, on s'arrête sur ce SSL
-            break;
            }
         }
      }
