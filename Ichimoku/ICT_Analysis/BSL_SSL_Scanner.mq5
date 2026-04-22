@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|   BSL / SSL SWEEP SCANNER — MULTI-ACTIFS MARKETWATCH            |
 //|   Pattern : Sweep BSL → Sweep SSL → Alerte LONG vers BSL        |
-//|   Version 1.00                                                   |
+//|   Version 1.10                                                   |
 //+------------------------------------------------------------------+
 //
 //  LOGIQUE DU PATTERN RECHERCHÉ
@@ -9,14 +9,14 @@
 //  1) Le prix monte et SWEEPE un swing high (Buy Side Liquidity = BSL)
 //     → bougie qui dépasse le swing high mais CLÔTURE EN DESSOUS
 //  2) Ensuite, le prix descend et SWEEPE un swing low (Sell Side
-//     Liquidity = SSL) plus bas que le SSL précédent
+//     Liquidity = SSL) formé AVANT le sweep BSL
 //     → bougie qui dépasse le swing low mais CLÔTURE AU-DESSUS
 //  3) Cette double séquence = signal LONG pour aller récupérer le BSL
 //     initialement sweepé (cible = niveau du BSL sweepé)
 //  ─────────────────────────────────────────────────────────────────
-//  L'EA s'attache sur N'IMPORTE QUEL graphique (l'actif/TF de ce
-//  graphique n'a aucune importance). Il scanne le MarketWatch entier
-//  sur le timeframe choisi en paramètre.
+//  Attacher l'EA sur le timeframe voulu (H1, M15, M5...).
+//  Il scanne TOUS les actifs du MarketWatch sur CE timeframe.
+//  Changer de graphique = changer le timeframe de scan.
 //+------------------------------------------------------------------+
 
 #property version   "1.00"
@@ -27,7 +27,6 @@
 //|  PARAMÈTRES                                                     |
 //+------------------------------------------------------------------+
 
-input ENUM_TIMEFRAMES ScanTimeframe   = PERIOD_M15;  // Timeframe de scan
 input int   SwingLookback             = 5;           // Bougies pivot pour swing H/L
 input int   SweepBarsBack             = 50;          // Bougies analysées par actif
 input int   MaxBarsAfterBSLSweep      = 30;          // Délai max entre BSL sweep et SSL sweep
@@ -67,12 +66,16 @@ struct PatternSignal
   {
    string   symbol;
    datetime signalTime;
-   double   bslLevel;       // Niveau du BSL sweepé (cible LONG)
-   double   sslLevel;       // Niveau du SSL sweepé (zone d'entrée)
-   double   entryZoneHigh;  // Zone d'entrée haute (au-dessus du SSL)
-   double   entryZoneLow;   // Zone d'entrée basse
+   double   bslLevel;         // Prix du swing high (BSL)
+   datetime bslCandleTime;    // Heure de la bougie du swing high (BSL formé)
+   datetime bslSweepTime;     // Heure de la bougie qui a sweepé le BSL
+   double   sslLevel;         // Prix du swing low (SSL)
+   datetime sslCandleTime;    // Heure de la bougie du swing low (SSL formé)
+   datetime sslSweepTime;     // Heure de la bougie qui a sweepé le SSL (= signalTime)
+   double   entryZoneHigh;    // Zone d'entrée haute
+   double   entryZoneLow;     // Zone d'entrée basse (SL)
    int      barsSinceSignal;
-   bool     alerted;        // Alerte déjà envoyée
+   bool     alerted;
   };
 
 //+------------------------------------------------------------------+
@@ -99,7 +102,7 @@ string        g_statusMsg = "En attente...";
 int OnInit()
   {
    Print("=== BSL/SSL SWEEP SCANNER démarré ===");
-   Print("Timeframe: ", EnumToString(ScanTimeframe));
+   Print("Timeframe: ", TFToString(PERIOD_CURRENT), " (graphique courant)");
    Print("Lookback: ", SwingLookback, " | Bougies analysées: ", SweepBarsBack);
 
    ArrayResize(g_signals, 0);
@@ -191,7 +194,7 @@ void AnalyzeSymbol(string sym)
 
    MqlRates r[];
    ArraySetAsSeries(r, true);
-   int copied = CopyRates(sym, ScanTimeframe, 0, needed, r);
+   int copied = CopyRates(sym, PERIOD_CURRENT, 0, needed, r);
    if(copied < needed * 0.7) return;
 
    int    available = copied;
@@ -368,7 +371,11 @@ void AnalyzeSymbol(string sym)
                g_signals[g_signalCount].symbol         = sym;
                g_signals[g_signalCount].signalTime     = r[b2].time;
                g_signals[g_signalCount].bslLevel       = bslPrice;
+               g_signals[g_signalCount].bslCandleTime  = r[swingHighs[hi].barIndex].time;
+               g_signals[g_signalCount].bslSweepTime   = r[b1].time;
                g_signals[g_signalCount].sslLevel       = sslPrice;
+               g_signals[g_signalCount].sslCandleTime  = r[sslBar].time;
+               g_signals[g_signalCount].sslSweepTime   = r[b2].time;
                g_signals[g_signalCount].entryZoneHigh  = r[b2].close;
                g_signals[g_signalCount].entryZoneLow   = sslPrice - (5 * symPoint);
                g_signals[g_signalCount].barsSinceSignal= b2;
@@ -399,27 +406,40 @@ void SendSignalAlert(PatternSignal &sig, double symPoint)
   {
    if(sig.alerted) return;
 
-   int    digits   = (int)SymbolInfoInteger(sig.symbol, SYMBOL_DIGITS);
-   string tfStr    = TFToString(ScanTimeframe);
+   int    digits = (int)SymbolInfoInteger(sig.symbol, SYMBOL_DIGITS);
+   string tfStr  = TFToString(PERIOD_CURRENT);
 
    string msg =
-      "🎯 BSL/SSL SWEEP SIGNAL — " + sig.symbol + " [" + tfStr + "]\n" +
-      "──────────────────────────────\n" +
-      "📈 ENTRÉE LONG\n" +
-      "  Zone entrée : " + DoubleToString(sig.entryZoneLow, digits) +
-                  " – " + DoubleToString(sig.entryZoneHigh, digits) + "\n" +
-      "  SSL sweepé  : " + DoubleToString(sig.sslLevel, digits) + "  (SL sous ce niveau)\n" +
-      "  🎯 Cible TP  : " + DoubleToString(sig.bslLevel, digits) + "  (BSL initial)\n" +
-      "──────────────────────────────\n" +
-      "Heure signal : " + TimeToString(sig.signalTime, TIME_DATE | TIME_MINUTES);
+      "🎯 BSL/SSL SWEEP — " + sig.symbol + " [" + tfStr + "]\n" +
+      "══════════════════════════════════\n" +
+      "── BSL (Buy Side Liquidity) ──\n" +
+      "  Swing High formé : " + TimeToString(sig.bslCandleTime, TIME_DATE|TIME_MINUTES) + "\n" +
+      "  Niveau BSL       : " + DoubleToString(sig.bslLevel, digits) + "\n" +
+      "  Sweepé le        : " + TimeToString(sig.bslSweepTime, TIME_DATE|TIME_MINUTES) + "\n" +
+      "──────────────────────────────────\n" +
+      "── SSL (Sell Side Liquidity) ──\n" +
+      "  Swing Low formé  : " + TimeToString(sig.sslCandleTime, TIME_DATE|TIME_MINUTES) + "\n" +
+      "  Niveau SSL       : " + DoubleToString(sig.sslLevel, digits) + "\n" +
+      "  Sweepé le        : " + TimeToString(sig.sslSweepTime, TIME_DATE|TIME_MINUTES) + "\n" +
+      "══════════════════════════════════\n" +
+      "📈 SIGNAL LONG\n" +
+      "  Entrée  : ~" + DoubleToString(sig.entryZoneHigh, digits) + "\n" +
+      "  SL      : sous " + DoubleToString(sig.sslLevel, digits) + "\n" +
+      "  🎯 TP   : " + DoubleToString(sig.bslLevel, digits) + "  (retour au BSL)";
 
    Print("═══ SIGNAL BSL/SSL ═══");
    Print(msg);
 
    if(AlertPopup)  Alert(msg);
    if(AlertSound)  PlaySound("alert.wav");
-   if(AlertEmail)  SendMail("BSL/SSL Signal — " + sig.symbol, msg);
-   if(AlertPush)   SendNotification("🎯 " + sig.symbol + " " + tfStr + " BSL/SSL LONG | TP: " + DoubleToString(sig.bslLevel, digits));
+   if(AlertEmail)  SendMail("BSL/SSL Signal — " + sig.symbol + " [" + tfStr + "]", msg);
+   if(AlertPush)   SendNotification(
+      "🎯 " + sig.symbol + " [" + tfStr + "] LONG" +
+      " | BSL:" + DoubleToString(sig.bslLevel, digits) +
+      " (sweep " + TimeToString(sig.bslSweepTime, TIME_MINUTES) + ")" +
+      " | SSL:" + DoubleToString(sig.sslLevel, digits) +
+      " (sweep " + TimeToString(sig.sslSweepTime, TIME_MINUTES) + ")"
+   );
 
    sig.alerted = true;
   }
@@ -439,9 +459,9 @@ void PurgeExpiredSignals()
      {
       // Calculer combien de bougies se sont écoulées depuis le signal
       datetime lastBarArr[1];
-      if(CopyTime(g_signals[i].symbol, ScanTimeframe, 0, 1, lastBarArr) > 0)
+      if(CopyTime(g_signals[i].symbol, PERIOD_CURRENT, 0, 1, lastBarArr) > 0)
         {
-         long tfSecs    = PeriodSeconds(ScanTimeframe);
+         long tfSecs    = PeriodSeconds(PERIOD_CURRENT);
          long elapsed   = (long)(TimeCurrent() - g_signals[i].signalTime);
          long barsElapsed = elapsed / tfSecs;
 
@@ -466,7 +486,7 @@ void DrawDashboard()
    string sep = "─────────────────────────────────────\n";
 
    d += "╔══════ BSL/SSL SWEEP SCANNER ═══════╗\n";
-   d += "║ TF: " + TFToString(ScanTimeframe);
+   d += "║ TF: " + TFToString(PERIOD_CURRENT);
    d += " | Pivot: " + IntegerToString(SwingLookback) + " bougies\n";
    d += "║ " + g_statusMsg + "\n";
    d += sep;
@@ -484,10 +504,14 @@ void DrawDashboard()
         {
          int digs = (int)SymbolInfoInteger(g_signals[i].symbol, SYMBOL_DIGITS);
          d += "║ 🎯 " + g_signals[i].symbol + "\n";
-         d += "║    Entrée : ~" + DoubleToString(g_signals[i].entryZoneHigh, digs) + "\n";
-         d += "║    SSL SL : " + DoubleToString(g_signals[i].sslLevel, digs) + "\n";
-         d += "║    BSL TP : " + DoubleToString(g_signals[i].bslLevel, digs) + "\n";
-         d += "║    Heure  : " + TimeToString(g_signals[i].signalTime, TIME_MINUTES) + "\n";
+         d += "║  BSL formé  : " + TimeToString(g_signals[i].bslCandleTime, TIME_DATE|TIME_MINUTES) + "\n";
+         d += "║  BSL niveau : " + DoubleToString(g_signals[i].bslLevel, digs) + "\n";
+         d += "║  BSL sweepé : " + TimeToString(g_signals[i].bslSweepTime, TIME_DATE|TIME_MINUTES) + "\n";
+         d += "║  SSL formé  : " + TimeToString(g_signals[i].sslCandleTime, TIME_DATE|TIME_MINUTES) + "\n";
+         d += "║  SSL niveau : " + DoubleToString(g_signals[i].sslLevel, digs) + "\n";
+         d += "║  SSL sweepé : " + TimeToString(g_signals[i].sslSweepTime, TIME_DATE|TIME_MINUTES) + "\n";
+         d += "║  Entrée ~   : " + DoubleToString(g_signals[i].entryZoneHigh, digs) + "\n";
+         d += "║  🎯 TP      : " + DoubleToString(g_signals[i].bslLevel, digs) + "\n";
          if(i < g_signalCount - 1) d += sep;
         }
      }
