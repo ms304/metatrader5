@@ -12,9 +12,9 @@
 //+------------------------------------------------------------------+
 //| Paramètres d'entrée modifiables dans l'EA                        |
 //+------------------------------------------------------------------+
-input double   Niveau_Declenchement = 4647.34;  // Prix de déclenchement (clôture bougie <)
-input double   TakeProfit           = 4624.95;  // Take Profit (en dessous du prix d'entrée)
-input double   StopLoss             = 4660.00;  // Stop Loss (au-dessus du prix d'entrée)
+input double   Niveau_Declenchement = 4591.5;  // Prix de déclenchement (clôture bougie <)
+input double   TakeProfit           = 4585.2;  // Take Profit (en dessous du prix d'entrée)
+input double   StopLoss             = 4592.5;  // Stop Loss (au-dessus du prix d'entrée)
 input double   Lots                 = 0.35;     // Volume des lots
 input int      MagicNumber          = 202412;   // Identifiant unique du trade
 input int      Slippage             = 50;       // Slippage maximum en points
