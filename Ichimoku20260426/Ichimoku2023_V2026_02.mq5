@@ -1,6 +1,6 @@
 //+------------------------------------------------------------------+
-//|                                          Ichimoku2023_Scanner.mq5 |
-//|                          Copyright 2023, Invest Data Systems FR. |
+//|                                         Ichimoku2026_Scanner.mq5 |
+//|                          Copyright 2026, Invest Data Systems FR. |
 //|                                             https://www.mql5.com |
 //+------------------------------------------------------------------+
 // Version avec détection de transition d'état (non validé -> validé)
@@ -8,8 +8,8 @@
 // Scan   : À chaque nouveau tick
 // Alertes : printf / Alert / SendNotification
 
-#property copyright "Copyright 2023, Invest Data Systems France."
-#property link      "https://www.mql5.com"
+#property copyright "Copyright 2026, Invest Data Systems France."
+#property link      "https://ntic974.blogspot.com"
 #property version   "1.01"
 
 #include <Trade\Trade.mqh>
