@@ -97,6 +97,7 @@ void OnDeinit(const int reason)
 //+------------------------------------------------------------------+
 void OnTick()
   {
+   // Récupération du Timeframe une seule fois par passage
    string tf = EnumToString(_Period);
 
    for(int i = 0; i < g_symbolCount; i++)
@@ -107,11 +108,13 @@ void OnTick()
       // Détection de transition false -> true uniquement
       if(curState == true && g_prevState[i] == false)
         {
-         double lastPrice = SymbolInfoDouble(sname, SYMBOL_BID);
-         
+         // Récupération du prix actuel pour le symbole détecté
+         double currentPrice = SymbolInfoDouble(sname, SYMBOL_BID);
+         int    digits       = (int)SymbolInfoInteger(sname, SYMBOL_DIGITS);
+
          string msg = "[Ichimoku Scanner] SIGNAL HAUSSIER STRICT : " + sname
                       + " | TF: " + tf
-                      + " | Prix: " + DoubleToString(lastPrice, _Digits)
+                      + " | Prix: " + DoubleToString(currentPrice, digits)
                       + " | " + TimeToString(TimeCurrent(), TIME_DATE|TIME_MINUTES);
 
          // 1. Journal
@@ -131,6 +134,7 @@ void OnTick()
 
 //+------------------------------------------------------------------+
 //| Calcule et retourne true si le signal haussier strict est validé |
+//| pour le symbole donné                                            |
 //+------------------------------------------------------------------+
 bool IchimokuBullishStrict(string sname)
   {
@@ -194,10 +198,34 @@ bool IchimokuBullishStrict(string sname)
    ArraySetAsSeries(senkou_span_b_buffer, true);
    ArraySetAsSeries(chikou_span_buffer,   true);
 
-   // --- Condition haussier strict ---
+   // --- Condition haussier strict (identique à l'original) ---
    bool priceAboveCloud  = (close0 > ssb0 && close0 > ssa0);
    bool priceAboveLines  = (close0 > tenkan0 && close0 > kijun0);
    bool chikouValidated  = (cs > tenkan_cs && cs > kijun_cs && cs > ssa_cs && cs > ssb_cs);
 
    return (priceAboveCloud && priceAboveLines && chikouValidated);
   }
+
+//+------------------------------------------------------------------+
+//| Retourne true uniquement sur la première bougie d'un nouveau bar |
+//+------------------------------------------------------------------+
+bool isNewBar()
+  {
+   static datetime last_time = 0;
+   datetime lastbar_time = SeriesInfoInteger(Symbol(), Period(), SERIES_LASTBAR_DATE);
+
+   if(last_time == 0)
+     {
+      last_time = lastbar_time;
+      return false;
+     }
+
+   if(last_time != lastbar_time)
+     {
+      last_time = lastbar_time;
+      return true;
+     }
+
+   return false;
+  }
+//+------------------------------------------------------------------+
