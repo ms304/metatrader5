@@ -13,7 +13,7 @@ input bool   InpPopup     = true;
 input bool   InpPush      = false;
 
 //--- Inputs Gemini
-input string GeminiAPIKey = "Remplace moi bro";
+input string GeminiAPIKey = "Remplace moi bro ou sis";
 input string GeminiModel  = "gemini-3.5-flash";
 
 //--- Structure état alertes
